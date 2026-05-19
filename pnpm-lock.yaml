@@ -23,6 +23,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      once:
+        specifier: ^1.4.0
+        version: 1.4.0
       pg:
         specifier: ^8.21.0
         version: 8.21.0
@@ -36,6 +39,9 @@ importers:
       '@types/node':
         specifier: ^22.19.19
         version: 22.19.19
+      '@types/once':
+        specifier: ^1.4.5
+        version: 1.4.5
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
@@ -384,6 +390,9 @@ packages:
 
   '@types/node@22.19.19':
     resolution: {integrity: sha512-dyh/xO2Fh5bYrfWaaqGrRQQGkNdmYw6AmaAUvYeUMNTWQtvb796ikLdmTchRmOlOiIJ1TDXfWgVx1QkUlQ6Hew==}
+
+  '@types/once@1.4.5':
+    resolution: {integrity: sha512-6SmAH30ms6q1EhF9scvUzk74ibtev1TGJaKntLSKzOVGBPwlLd/nl/SYFTC5/pVv/rrv1x/JTr6sH5rmVbizAQ==}
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
@@ -1274,6 +1283,8 @@ snapshots:
   '@types/node@22.19.19':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/once@1.4.5': {}
 
   '@types/pg@8.20.0':
     dependencies:
