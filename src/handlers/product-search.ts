@@ -122,7 +122,7 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
       response.suggestion = `No se encontraron ${input.type}${input.size ? ` en talla ${input.size}` : ""}. Intenta con otros filtros.`;
     }
 
-    logQuery({ endpoint: "product_search", input: input as Record<string, unknown>, resultCount: products.length, durationMs: Date.now() - start });
+    logQuery({ endpoint: "product_search", input: input as unknown as import("@prisma/client").Prisma.InputJsonObject, resultCount: products.length, durationMs: Date.now() - start });
     res.json(response);
   } catch (err) {
     console.error("[product_search] Error:", err);

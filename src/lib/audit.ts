@@ -1,8 +1,10 @@
 import { prisma } from "./prisma";
 
+import type { Prisma } from "@prisma/client";
+
 interface LogQueryOptions {
   endpoint: string;
-  input: Record<string, unknown>;
+  input: Prisma.InputJsonObject;
   resultCount?: number;
   durationMs?: number;
 }
