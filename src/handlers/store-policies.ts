@@ -3,6 +3,19 @@ import { prisma } from "../lib/prisma";
 import { logQuery } from "../lib/audit";
 import type { StorePoliciesInput } from "../types";
 
+// Aliases para topics enviados en inglés → francés
+const TOPIC_ALIASES: Record<string, string> = {
+  returns: "retours",
+  return: "retours",
+  delivery: "livraison",
+  shipping: "livraison",
+  payment: "paiement",
+  contact: "contact",
+  products: "produits",
+  sizes: "tailles_faq",
+  international: "international",
+};
+
 export async function storePolicies(req: Request, res: Response): Promise<void> {
   const start = Date.now();
   try {
@@ -13,12 +26,14 @@ export async function storePolicies(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const resolvedTopic = TOPIC_ALIASES[topic.toLowerCase()] ?? topic;
+
     const policy = await prisma.storePolicy.findUnique({
-      where: { clientId_topic: { clientId: "mesdessous", topic } },
+      where: { clientId_topic: { clientId: "mesdessous", topic: resolvedTopic } },
     });
 
     if (!policy) {
-      logQuery({ endpoint: "store_policies", input: { topic }, resultCount: 0, durationMs: Date.now() - start });
+      logQuery({ endpoint: "store_policies", input: { topic, resolvedTopic }, resultCount: 0, durationMs: Date.now() - start });
       res.json({
         topic,
         content: null,

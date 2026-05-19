@@ -56,8 +56,19 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
     );
 
     if (input.size) {
-      const sizePattern = `(^|[,\\s])${escapeRegex(input.size)}([,\\s]|$)`;
-      conditions.push(Prisma.sql`sizes ~* ${sizePattern}`);
+      // Normalize: "95C" or "95 C" → number + optional space + letter
+      // DB format: "95 C (eu 80), 90 B (eu 75), ..."
+      const normalized = input.size.trim().replace(/\s+/g, "").toUpperCase();
+      const parts = normalized.match(/^(\d+)([A-Z]+)$/);
+      if (parts) {
+        const [, num, letter] = parts;
+        // Matches: start-or-comma, optional spaces, number, optional space, letter, optional (eu XX) suffix, then comma or end
+        const sizePattern = `(^|,)\\s*${num}\\s*${letter}(\\s*\\([^)]*\\))?(,|$)`;
+        conditions.push(Prisma.sql`sizes ~* ${sizePattern}`);
+      } else {
+        // Fallback for non-standard formats
+        conditions.push(Prisma.sql`LOWER(sizes) LIKE ${`%${input.size.toLowerCase()}%`}`);
+      }
     }
 
     if (input.gender) {
