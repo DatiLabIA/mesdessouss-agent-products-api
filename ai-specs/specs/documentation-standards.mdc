@@ -1,0 +1,67 @@
+---
+Descripción: Estándares y mejores prácticas para la documentación técnica de este proyecto, incluyendo la estructura de la documentación, los procesos de actualización y las reglas del lenguaje.
+globs:
+alwaysApply: true
+---
+# Reglas y patrones para la documentación y las especificaciones de IA
+
+## Introducción
+La documentación técnica se aplica a toda la documentación relativa al proyecto, como el modelo de datos, el archivo README, las especificaciones de la API y otros documentos de MD que describen cómo se estructura, ejecuta y opera el proyecto.
+
+Las especificaciones de IA se refieren a los documentos que explican a los agentes de IA cómo comportarse, documentar, planificar, codificar, etc., lo que incluye los acuerdos, estándares y convenciones del equipo.
+
+## Reglas generales
+- ESCRIBA SIEMPRE EN ESPAÑOL toda la documentación técnica, especificaciones de IA, guías, skills y archivos de agentes. Esto garantiza consistencia con los estándares existentes del proyecto.
+
+> **Excepción:** Los artefactos técnicos del código fuente deben mantenerse en inglés: nombres de variables, funciones, clases, comentarios en el código, mensajes de error, mensajes de log, nombres de tablas/columnas en la BD, mensajes de commit de Git y nombres de tests.
+
+## Documentación Técnica
+Antes de realizar cualquier commit o git push, o si se le solicita documentar un commit, SIEMPRE debe revisar qué documentación técnica debe actualizarse.
+
+Al actualizar la documentación, haré lo siguiente:
+1. Revisaré todos los cambios recientes en el código base.
+2. Identificaré qué archivos de documentación necesitan actualizaciones según los cambios. Mapa de responsabilidades:
+
+| Cambio realizado | Archivo a actualizar |
+| :--- | :--- |
+| Nuevo modelo o campo en `schema.prisma` | `ai-specs/specs/data-model.md` + diagrama ERD Mermaid |
+| Nuevo endpoint o cambio de contrato HTTP | `ai-specs/specs/api-spec.yml` |
+| Nuevo patrón arquitectónico reutilizable | `docs/guides/*.md` (guía permanente) |
+| Cambio de stack, dependencias o setup local | `ai-specs/specs/backend-standards.mdc` / `docs/development/` |
+| Cambio en reglas de agentes de IA o skills | `ai-specs/.agents/` o `ai-specs/specs/skills/` |
+| Cambio en estándares de commits | `docs/development/conventional_commit.md` + `ai-specs/specs/skills/development-workflow.md` |
+3. Actualizar cada archivo de documentación afectado, manteniendo la coherencia con la documentación existente.
+4. Asegurarse de que toda la documentación tenga el formato correcto y siga la estructura establecida.
+5. Verificar que todos los cambios se reflejen con precisión en la documentación.
+6. Informar qué archivos se actualizaron y qué cambios se realizaron.
+
+## Ciclo de vida de `docs/features/`
+
+Los archivos en `docs/features/` son **planes de implementación temporales**. Cuando la IA consulte cualquier archivo de esa carpeta, DEBE verificar:
+
+1. ¿La feature ya está implementada en el código? (verificar en `src/`)
+2. ¿Ya existe una guía permanente en `docs/guides/` que la documente?
+
+Si ambas respuestas son **sí** → notificar al usuario que el archivo es candidato a eliminación.
+Si solo está implementada pero **no tiene guía** → sugerir crear la guía en `docs/guides/` antes de eliminar el plan.
+Si aún **no está implementada** → el archivo sigue siendo válido como plan activo.
+
+> Los planes completados no aportan contexto útil a la IA y generan ruido. Su reemplazo natural es la guía permanente en `docs/guides/`.
+
+## Especificaciones de la IA
+
+Esta regla establece un proceso obligatorio para que la IA:
+* Aprenda de los comentarios, la orientación y las sugerencias de los usuarios durante las interacciones. * Identificar oportunidades para mejorar las Reglas de Desarrollo existentes con base en estos aprendizajes de forma proactiva.
+* Mantener la asistencia de la IA alineada con las necesidades cambiantes del proyecto y las expectativas de los usuarios.
+* Incorporar la retroalimentación de los usuarios en el marco operativo de la IA para maximizar su valor.
+
+Esta regla se aplica después de cualquier interacción en la que el usuario proporcione retroalimentación, explícita o implícita, sugerencias, correcciones, nueva información o exprese preferencias. **La IA DEBE analizar activamente todas las interacciones del usuario en busca de estas oportunidades de aprendizaje, no solo esperar pasivamente la retroalimentación directa, sino perfeccionar proactivamente su comprensión y las mejores prácticas del proyecto.**
+
+### Errores comunes y antipatrones que la IA debe evitar
+
+* **Omitir el proceso de aprobación:** Aplicar modificaciones a las reglas sin obtener primero la revisión y aprobación explícitas del usuario.
+* **Propuestas no vinculadas:** Proponer cambios a las reglas sin vincularlos claramente con la retroalimentación específica del usuario o la información obtenida de la interacción. * **Modificaciones imprecisas:** Sugerir modificaciones sin identificar con precisión qué regla o secciones específicas de una regla deben cambiarse, lo que dificulta una revisión eficaz del usuario.
+* **Comentarios no abordados:** No iniciar el proceso de aprendizaje y revisión cuando el usuario proporciona comentarios relevantes que podrían mejorar las reglas.
+* **Exceso de alcance:** Actualizar simultáneamente varias reglas no relacionadas o realizar cambios que exceden el alcance de los comentarios recibidos.
+* **Cambios de reglas no solicitados:** Modificar las reglas de forma proactiva cuando no existe una conexión directa con los comentarios del usuario ni una oportunidad de aprendizaje. Las actualizaciones de las reglas deben ser reactivas y basadas en los comentarios.
+* **Confirmación de actualización faltante:** No notificar al usuario después de que una modificación de una regla se haya implementado correctamente tras su aprobación.

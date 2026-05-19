@@ -1,0 +1,63 @@
+---
+Descripción: Este documento contiene todas las reglas y directrices de desarrollo para este proyecto, aplicables a todos los agentes de IA (Claude, Cursor, Codex, Gemini, etc.).
+alwaysApply: true
+---
+
+## 1. Principios básicos
+
+- **Tareas pequeñas, una a la vez**: Trabaje siempre paso a paso, una a la vez. Nunca avance más de un paso.
+- **Desarrollo basado en pruebas**: Comience con las pruebas fallidas para cualquier nueva funcionalidad (TDD), según los detalles de la tarea.
+- **Seguridad de tipos**: Todo el código debe estar completamente tipificado.
+- **Nombres claros**: Use nombres claros y descriptivos para todas las variables y funciones.
+- **Cambios incrementales**: Prefiera los cambios incrementales y específicos a las modificaciones grandes y complejas.
+- **Cuestione las suposiciones**: Siempre cuestione las suposiciones e inferencias.
+- **Detección de patrones**: Detecte y resalte patrones de código repetidos.
+
+## 2. Estándares del lenguaje
+- **Documentación en español**: Toda la documentación técnica, especificaciones de IA, skills y guías se escriben en español para mantener consistencia con los estándares del proyecto.
+- **Código en inglés obligatorio**: Los artefactos técnicos del código fuente deben mantenerse en inglés:
+  - Código (variables, funciones, clases, comentarios en código, mensajes de error, logs)
+  - Esquemas de datos y nombres de bases de datos
+  - Mensajes de commit de Git
+  - Nombres y descripciones de tests
+
+## 3. Estándares específicos
+
+Para obtener información detallada sobre estándares y directrices específicos para las diferentes áreas del proyecto, consulte:
+
+- [Estándares de backend](./backend-standards.mdc) - Desarrollo de API, patrones de bases de datos, pruebas, seguridad y mejores prácticas de backend
+- [Estándares de frontend](./frontend-standards.mdc) - Componentes de React, directrices de UI/UX y arquitectura frontend
+- [Estándares de documentación](./documentation-standards.mdc) - Estructura, formato y directrices de mantenimiento de la documentación técnica, incluyendo estándares de IA como este documento
+
+## 4. Guías de referencia adicionales
+
+Si necesitas información adicional sobre decisiones de arquitectura, patrones implementados o guías de integración, consulta la carpeta `docs/guides/`:
+
+| Guía | Descripción |
+|---|---|
+| [Clean Architecture Decision](../../docs/guides/architecture-clean-architecture-decision.md) | Decisión y principios de arquitectura limpia |
+| [Builder Pattern — Flows](../../docs/guides/pattern-builder-flow.md) | Builder pattern para construir flows y pasos |
+| [Observer Pattern — Mass Send](../../docs/guides/pattern-observer-mass-send.md) | Observer para envíos masivos |
+| [Event Bus Usage](../../docs/guides/event-bus-usage-guide.md) | Event bus PGMQ / InMemory: publicar y consumir eventos |
+| [Command Handler Pattern](../../docs/guides/command-handler-pattern.md) | Patrón CQRS: Commands y Queries |
+| [Error Handling Sequences](../../docs/guides/error-handling-sequences.md) | Flujos de manejo de errores con AppError / ErrorFactory |
+| [Database Resolver](../../docs/guides/database-resolver.md) | Configuración de drivers de base de datos |
+| [Email Provider Abstraction](../../docs/guides/email-provider-abstraction-guide.md) | Cambiar o agregar proveedor de email |
+| [Extensibility — Multi Provider](../../docs/guides/extensibility-multi-provider.md) | Añadir providers de IA (OpenAI, Gemini, etc.) |
+| [Multi-Agent Architecture](../../docs/guides/multi-agent-architecture.md) | Sistema multi-agente con IA |
+| [CRM Integration Refactoring](../../docs/guides/crm-integration-refactoring.md) | Integración multi-CRM |
+| [Handoff Destinations](../../docs/guides/handoff-destination-guide.md) | Transferencia a agente humano |
+| [API Endpoints](../../docs/guides/api-endpoints.md) | Listado completo de endpoints disponibles |
+| [Storage / File Upload](../../docs/guides/file-upload-system.md) | Sistema de carga de archivos y storage providers |
+| Observabilidad | Se migrará a librería externa |
+| [Validación de Entrada](../../docs/guides/input-validation-system.md) | Sistema de validaciones automáticas por tipo de dato |
+| [Webhook System](../../docs/guides/webhook-system.md) | Sistema de webhooks hacia sistemas externos |
+| [Webhook Receiver Example](../../docs/guides/webhook-receiver-example.md) | Ejemplo de servidor receptor de webhooks |
+| [WebChat Integration](../frontend/webchat-integration-guide.md) | Solo para colegas frontend |
+| [WebChat Message Types](../frontend/webchat-message-types.md) | Solo para colegas frontend |
+| [Widget Streaming](../frontend/widget-streaming-guide.md) | Solo para colegas frontend |
+| [Flow Handover Guide](../../docs/guides/flow-handover-guide.md) | Transición de FLOW a agente IA (Bedrock) |
+| [Knowledge Base System](../../docs/guides/knowledge-base-system.md) | Gestión de documentos para contexto de IA por flow |
+| [Claude Models Reference](../../docs/guides/claude-models-reference.md) | IDs de modelos Claude 4.5 y regionales |
+
+> **Regla**: Ante cualquier duda sobre implementación de un patrón, integración externa o decisión de diseño — **revisa primero `docs/guides/`** antes de inventar una solución.

@@ -1,0 +1,55 @@
+name: Generate Private API Docs
+
+on:
+  push:
+    branches:
+      - main  # Se activa al subir cambios a main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+        env:
+          HUSKY: "0"
+
+      - name: Generar Prisma Client
+        run: pnpm run db:generate
+
+      - name: Generar Swagger JSON
+        run: pnpm run generate-swagger
+        env:
+          ENVIRONMENT: development
+          DB_CONNECTION: postgres
+          DATABASE_URL: postgres://user:pass@localhost:5432/db
+          DB_ENABLE_PGMQ: "false"
+
+      - name: Check for changes and Commit
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f src/shared/swagger/swagger.json
+          # Solo hace commit si el JSON cambió realmente
+          if ! git diff --staged --quiet; then
+            git commit -m "docs: auto-update swagger.json [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
+        env:
+          HUSKY: "0"

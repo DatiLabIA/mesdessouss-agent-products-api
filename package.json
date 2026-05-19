@@ -1,0 +1,35 @@
+{
+  "name": "mesdessouss-agent-products-api",
+  "version": "1.0.0",
+  "description": "External Tool Service — Product catalog for DatiHub Claude Tool Use integration",
+  "main": "dist/server.js",
+  "packageManager": "pnpm@10.16.1",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:prod": "prisma migrate deploy && node dist/server.js",
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "sync:products": "tsx scripts/sync-products.ts",
+    "seed:size-guides": "tsx scripts/seed-size-guides.ts",
+    "seed:policies": "tsx scripts/seed-policies.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@prisma/config": "^7.8.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "pg": "^8.21.0",
+    "prisma": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.19",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.22.2",
+    "typescript": "^5.9.3"
+  }
+}

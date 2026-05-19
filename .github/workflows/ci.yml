@@ -1,0 +1,65 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        run: |
+          if [ -f "pnpm-lock.yaml" ]; then
+            echo "manager=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install_cmd=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "build_cmd=pnpm run build" >> "$GITHUB_OUTPUT"
+          elif [ -f "package-lock.json" ] || [ -f "npm-shrinkwrap.json" ]; then
+            echo "manager=npm" >> "$GITHUB_OUTPUT"
+            echo "install_cmd=npm ci" >> "$GITHUB_OUTPUT"
+            echo "build_cmd=npm run build" >> "$GITHUB_OUTPUT"
+          elif [ -f "bun.lockb" ] || [ -f "bun.lock" ]; then
+            echo "manager=bun" >> "$GITHUB_OUTPUT"
+            echo "install_cmd=bun install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "build_cmd=bun run build" >> "$GITHUB_OUTPUT"
+          else
+            echo "No known lockfile found. Falling back to npm." >&2
+            echo "manager=npm" >> "$GITHUB_OUTPUT"
+            echo "install_cmd=npm install" >> "$GITHUB_OUTPUT"
+            echo "build_cmd=npm run build" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm via Corepack
+        if: steps.pm.outputs.manager == 'pnpm'
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Setup Bun
+        if: steps.pm.outputs.manager == 'bun'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: ${{ steps.pm.outputs.install_cmd }}
+
+      # - name: Security audit
+      #   if: steps.pm.outputs.manager == 'npm'
+      #   run: npm audit --audit-level=high --production
+
+      # - name: Security audit
+      #   if: steps.pm.outputs.manager == 'pnpm'
+      #   run: pnpm audit --audit-level=high --prod
+
+      - name: Build project
+        run: ${{ steps.pm.outputs.build_cmd }}

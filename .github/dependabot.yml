@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    groups:
+      aws-sdk:
+        patterns:
+          - "@aws-sdk/*"
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+      eslint:
+        patterns:
+          - "eslint*"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+      vitest:
+        patterns:
+          - "vitest*"
+          - "@vitest/*"
+      types:
+        patterns:
+          - "@types/*"
+    ignore:
+      # Paquete alpha — actualizar manualmente con revisión
+      - dependency-name: "whatsapp"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"

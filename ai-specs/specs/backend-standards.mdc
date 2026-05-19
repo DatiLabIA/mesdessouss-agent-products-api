@@ -1,0 +1,1867 @@
+---
+Descripción: Estándares de desarrollo backend, mejores prácticas y convenciones para aplicaciones LTI Node.js/TypeScript/Express, incluyendo diseño orientado al dominio, principios SOLID, patrones de arquitectura, diseño de API y prácticas de prueba.
+globs: ["src/**/*.ts", "prisma/**/*.{prisma,ts}", "jest.config.js", "tsconfig.json", "package.json"]
+alwaysApply: true
+---
+
+> **📚 Información adicional**: Si necesitas detalles sobre decisiones de arquitectura, patrones implementados o guías de integración, consulta [`docs/guides/`](../../docs/guides/) — ahí vive la documentación permanente del proyecto. Ver índice completo en [base-standards.mdc](./base-standards.mdc#4-guías-de-referencia-adicionales).
+
+# Estándares y mejores prácticas para proyectos backend
+
+- [Descripción general](#overview)
+- [Pila tecnológica](#technology-stack)
+- [Tecnologías principales](#core-technologies)
+- [Base de datos y ORM](#database--orm)
+- [Marco de pruebas](#testing-framework)
+- [Herramientas de desarrollo](#development-tools)
+- [Arquitectura Resumen](#architecture-overview)
+- [Arquitectura limpia](#Clean-arquitecture) <-- abarcaría lo de la arquitectura en capas
+- [Diseño basado en el dominio (DDD)](#domain-driven-design-ddd)
+- [Arquitectura en capas](#layered-architecture) <--- por revisar
+- [Estructura del proyecto](#project-structure)
+- [Principios del diseño basado en el dominio](#domain-driven-design-principles)
+- [Entidades](#entities)
+- [Objetos de valor](#value-objects)
+- [Agregados](#aggregates)
+- [Repositorios](#repositories)
+- [Servicios del dominio](#domain-services)
+- [Recomendaciones adicionales](#additional-recommendations)
+- [SOLID y DRY Principios](#principios-solidos-y-secos)
+- [Principio de Responsabilidad Única (PRU)](#principio-de-responsabilidad-única-pru)
+- [Principio Abierto/Cerrado (PCC)](#principio-abierto-cerrado-pru)
+- [Principio de Sustitución de Liskov (SSP)](#principio-de-sustitución-de-liskov-lsp)
+- [Principio de Segregación de Interfaz (ISP)](#principio-de-segregación-de-interfaz-isp)
+- [Principio de Inversión de Dependencias (DIP)](#principio-de-inversión-de-dependencias-dip)
+- [DRY (No te repitas)](#dry-dont-repeat-yourself)
+- [Estándares de Codificación](#estándares-de-codificación)
+- [Lenguaje y Convenciones de Nomenclatura](#lenguaje-y-convenciones-de-nomenclatura)
+- [TypeScript Uso](#typescript-usage)
+- [Gestión de errores](#error-handling)
+- [Patrones de validación](#validation-patterns)
+- [Estándares de registro](#logging-standards)
+- [Estándares de diseño de API](#api-design-standards)
+- [Puntos finales REST](#rest-endpoints)
+- [Patrones de solicitud/respuesta](#requestresponse-patterns)
+- [Formato de respuesta de error](#error-response-format)
+- [Configuración de CORS](#cors-configuration)
+- [Patrones de base de datos](#database-patterns)
+- [Esquema Prisma](#prisma-schema)
+- [Migraciones](#migrations)
+- [Patrón de repositorio](#repository-pattern)
+- [Estándares de prueba](#testing-standards) <-- opcional
+- [Pruebas unitarias](#unit-testing)
+- [Pruebas de integración](#integration-testing)
+- [Requisitos de cobertura de pruebas](#test-coverage-requirements)
+- [Estándares de simulación](#mocking-standards)
+- [Mejores prácticas de rendimiento](#performance-best-practices)
+- [Optimización de consultas de bases de datos](#database-query-optimization)
+- [Patrones asincrónicos/de espera](#asyncawait-patterns)
+- [Rendimiento de la gestión de errores](#error-handling-performance)
+- [Mejores prácticas de seguridad](#security-best-practices)
+- [Validación de entrada](#input-validation)
+- [Variables de entorno](#environment-variables)
+- [Inyección de dependencias](#dependency-injection)
+- [Flujo de trabajo de desarrollo](#development-workflow)
+- [Git Flujo de trabajo](#git-workflow)
+- [Scripts de desarrollo](#development-scripts)
+- [Calidad del código](#code-quality)
+- [Deployment](#deployment)
+
+---
+
+## Resumen
+
+Este documento describe las mejores prácticas, convenciones y estándares utilizados en la aplicación backend LTI. El backend sigue los principios del Diseño Dirigido por el Dominio (DDD) e implementa una arquitectura combinada con Clean Arquitecture para garantizar la consistencia, la mantenibilidad y la escalabilidad del código.
+
+## Pila de Tecnología
+
+### Tecnologías Principales
+- **Node.js v21+**: Entorno de ejecución
+- **TypeScript 5**: Desarrollo con seguridad de tipos en modo estricto
+- **Express v5**: Framework de aplicaciones web
+- **Prisma v7**: ORM moderno para acceso a bases de datos
+
+### Bases de datos, Cache y Colas
+- **PostgreSQL**: Base de datos relacional principal
+- **Cliente Prisma**: Cliente de base de datos con seguridad de tipos
+- **Prisma Migrate**: Herramienta de migración de bases de datos
+- **Redis**: Cache y broker de colas
+- **PGMQ**: Sistema de colas y event bus sobre PostgreSQL (implementación activa del Event Bus)
+- **BullMQ**: Workers para procesos asíncronos y scheduled jobs
+
+### IA y Tiempo Real
+- **AWS Bedrock (Claude 3.5 Sonnet)**: Procesamiento de lenguaje natural con RAG
+- **Anthropic Claude SDK**: Integración directa con la API de Anthropic
+- **Socket.IO**: Comunicación en tiempo real
+
+### Validación e Inyección de Dependencias
+- **Zod v4**: Validación de esquemas y DTOs en la capa de aplicación (controllers/schemas)
+- **TSyringe**: Contenedor de inyección de dependencias (decoradores `@injectable`, `@inject`)
+
+### Framework de Pruebas
+- **Vitest**: Framework de pruebas compatible con TypeScript
+- **Umbral de Cobertura**: 90% para ramas, funciones, líneas y sentencias
+- **Ubicación de Pruebas**: Archivos `.test.ts` junto al código fuente
+
+### Herramientas de Desarrollo
+- **ESLint + Prettier**: Linting y formato de código
+- **Compilador de TypeScript**: Comprobación de tipos y compilación
+- **Winston**: Logging estructurado
+
+## Architecture Overview
+
+### Domain-Driven Design (DDD)
+
+Domain-Driven Design is a methodology that focuses on modeling software according to business logic and domain knowledge. By centering development on a deep understanding of the domain, DDD facilitates the creation of complex systems.
+
+**Benefits:**
+- **Improved Communication**: Promotes a common language between developers and domain experts, improving communication and reducing interpretation errors.
+- **Clear Domain Models**: Helps build models that accurately reflect business rules and processes.
+- **High Maintainability**: By dividing the system into subdomains, it facilitates maintenance and software evolution.
+
+### Layered Architecture
+
+The backend follows Clean Architecture with DDD:
+
+**Infrastructure Layer** (`src/infraestructure/`)
+- Controllers: HTTP request handlers agrupados por feature (`http/controllers/`)
+- Routes: Rutas Express agrupadas por feature (`http/routes/`)
+- Schemas Zod de entrada HTTP (`http/controllers/schemas/`)
+- Middlewares: Auth, CORS, ResponseBuilder, ErrorHandler (`http/middlewares/`)
+- Adapters: WhatsAppAdapter, WebChatAdapter (`adapters/messaging/`)
+- Repositorios Prisma: implementaciones concretas de todos los repositories (`database/prisma/`)
+- DB Facades: BaseRepository, PrismaConnection, BaseSeeder (`database/facades/`)
+- Servicios externos: AI (Bedrock, Claude), Email (Brevo), WhatsApp API, Metrics, Adverse Events (`services/`)
+- Event Bus: InMemoryEventBus + PGMQEventBus con handlers y bootstrap (`event-bus/`)
+- Command/Query Bus: CommandBus, QueryBus (`bus/`)
+- Observability: HealthCheck, Logger (Winston adapter), Metrics (`observability/`)
+- Cache: RedisService (`cache/redis/`)
+- Jobs: node-cron adapter + scheduled workers (`jobs/`)
+- WebSocket: Socket.IO server (`socket-io.ts`)
+- DI: TSyringe container + global-symbol tokens (`DI/`)
+
+**Application Layer** (`src/app/`)
+- Use cases: orquestan dominio + infraestructura (`use-cases/`)
+- Commands + Handlers: login, register, logout, refresh-token, create-session (`commands/`)
+- Queries + Handlers: get-profile (`queries/`)
+- Application services: Logger, MessageSender, TaskManager, Session (`services/`)
+- Builders: MetricEventBuilder (`builders/`)
+- Entity ↔ DTO mappers (`mappers/`)
+- Observers: IFlowObserver implementations + FlowOrchestrator (`observers/`)
+- Application ports: SessionService, AdverseEventInterface, SchedulerInput (`ports/`)
+
+**Domain Layer** (`src/domain/`)
+- Entities: User, Flow, FlowStep, Conversation, Metrics, etc. (`entities/`)
+- Value Objects: Email, Password, Role, Webhook, enums (`value-objects/`)
+- Domain Events: UserCreatedEvent, MetricRecordedEvent, WebhookTriggered (`events/`)
+- Repository interfaces: IFlowRepository, IUserRepository, etc. (`repositories/`)
+- Domain ports — contratos de servicios externos CON MÉTODOS (`interfaces/ports/`)
+- Domain types — data shapes SOLO PROPIEDADES (`interfaces/types/`)
+- Domain services: FlowNavigationService, PasswordService, IdMapper (`services/`)
+- Builders: FlowBuilder, FlowStepBuilder, StepOptionBuilder (`builders/`)
+- AppError, AppSuccess, ErrorFactory, SuccessFactory (`exceptions/`)
+- Policies: UserRolePolicyService (`policies/`)
+- Domain validators: InputValidators, FileValidators (`validators/`)
+
+> **Regla de Oro**: Las capas internas NUNCA importan de capas externas.
+> `Infrastructure → Application → Domain` (solo en esta dirección)
+
+### Project Structure
+
+```
+src/
+├── domain/
+│   ├── entities/              # User, Flow, FlowStep, Conversation, Metrics, etc.
+│   ├── value-objects/         # Email, Password, Role, enums-objects.vo.ts
+│   ├── events/                # UserCreatedEvent, MetricRecordedEvent, WebhookTriggered
+│   ├── repositories/          # IUserRepository, IFlowRepository, ISessionRepository…
+│   ├── interfaces/
+│   │   ├── ports/             # Contratos CON MÉTODOS: IAIService, IEventBus, IPasswordHasher…
+│   │   └── types/             # Data shapes SOLO PROPIEDADES: AuthPayload, IFlowStep, AIResponse…
+│   ├── services/              # FlowNavigationService, PasswordService, IdMapper
+│   ├── builders/              # FlowBuilder, FlowStepBuilder, StepOptionBuilder
+│   ├── exceptions/            # AppError, AppSuccess, ErrorFactory, SuccessFactory
+│   ├── policies/              # UserRolePolicyService
+│   └── validators/            # InputValidators, FileValidators
+│
+├── app/
+│   ├── use-cases/             # ProcessIncomingMessage, CreateFlow, GenerateAIResponse…
+│   ├── commands/              # login, register, logout, refresh-token (CQRS Commands)
+│   ├── queries/               # get-profile (CQRS Queries)
+│   ├── builders/              # MetricEventBuilder
+│   ├── services/              # Logger, MessageSenderService, TaskManager, SessionService
+│   ├── mappers/               # Entity ↔ DTO mappers
+│   ├── observers/             # FlowObserver, FlowSchedulerObserver, FlowOrchestrator
+│   └── ports/                 # Contratos de aplicación: SessionService, AdverseEvent…
+│
+├── infraestructure/
+│   ├── http/
+│   │   ├── controllers/       # Entrada HTTP por feature (flows, whatsapp, auth, metrics…)
+│   │   │   └── schemas/       # Schemas Zod de validación de entrada HTTP
+│   │   ├── middlewares/       # Auth, CORS, ResponseBuilder, ErrorHandler
+│   │   └── routes/            # Rutas Express agrupadas por feature
+│   ├── database/
+│   │   ├── prisma/            # PrismaFlowRepository, PrismaUserRepository…
+│   │   ├── facades/           # BaseRepository, PrismaConnection, BaseSeeder
+│   │   └── mapper/            # Prisma ↔ Domain mappers (User, Session)
+│   ├── adapters/messaging/    # WhatsAppAdapter, WebChatAdapter
+│   ├── event-bus/             # InMemoryEventBus, PGMQEventBus, handlers/, bootstrap
+│   ├── bus/                   # CommandBus, QueryBus
+│   ├── services/              # Bedrock, ClaudeAPI, Brevo, Metrics, AdverseEvents, Handoff…
+│   ├── observability/         # HealthCheck, WinstonLogger, MetricsCollection
+│   ├── cache/redis/           # RedisService
+│   ├── jobs/                  # node-cron adapter + autoFlowWorker, scheduledFlowWorker…
+│   ├── config/                # ENV, DB resolver, Drivers, Odoo, WhatsApp
+│   ├── DI/                    # container.ts + global-symbol.ts (TSyringe tokens)
+│   └── socket-io.ts           # WebSocket/real-time server
+│
+├── shared/
+│   ├── libs/                  # bcrypt.lib, jwt.lib, rate-limiter.config
+│   ├── swagger/               # OpenAPI registry, swagger-init, create-swaggerJson
+│   ├── interfaces/            # Interfaces transversales (files, flows, realtime…)
+│   ├── constants/             # session-ttl.constants
+│   ├── enum/                  # status-enum, taks-type.enum
+│   └── utils/                 # asyncHandler, normalizeAnswers, sanitizeIncomingMessage…
+│
+├── services/                  # ⚠️ Legacy — en migración hacia infraestructure/services/
+│
+└── server.ts                  # Application entry point
+
+prisma/
+├── schema.prisma              # Database schema (single source of truth)
+├── seed.ts                    # Seeds entry point
+├── seeders/                   # DatabaseSeeder + demos (ecommerce, medical)
+└── migrations/
+
+test/
+├── app/
+├── domain/
+├── infraestructure/
+└── setup.ts
+```
+
+## Domain-Driven Design Principles
+
+### Entities
+
+Entities are objects with a unique identity that persists over time, regardless of whether their attributes change. In our architecture, entities extend from the base class `Entity<T>` and encapsulate business logic.
+
+**Rules:**
+- **Gold**: Always validated with entity from prisma (update if dont matches with properties and added if is required)
+- **Location**: `src/domain/entities/`
+- **Identity**: Always identified by a `UUID` value object — never a raw `string` or `number` id
+- **Extends `Entity<T>`**: Inherit from the base class to get `id`, `createdAt`, `updatedAt`
+- **Enums**: Enums used in entities must live in `src/domain/value-objects/enums-objects.vo.ts` — see [Enum Management](#value-objects)
+- **Static Factory Method**: Use a `static create()` method to guarantee the entity is born in a valid state and `static reconstitute()` methods for persistence conversion with the mapper for externaly.
+
+**Before:**
+```typescript
+// Data handled as flat objects (Anemic Domain Model)
+// No validation, no encapsulation, and no clear identity.
+const user = {
+    id: "uuid-123",
+    email: 'sergio@example.com',
+    role: 'OPERATOR'
+};
+```
+
+**After:**
+```typescript
+// src/domain/entities/User.ts
+import { Entity } from '../base/Entity';
+import { UUID } from '../value-objects/UUID';
+import { Role } from '../value-objects/enums-objects.vo';
+import { PasswordService } from '../services/PasswordService';
+
+interface UserProps {
+    email: string;
+    password: string;
+    name: string;
+    role: Role;
+    createdAt?: Date;
+    updatedAt?: Date;
+}
+
+export class User extends Entity<UserProps> {
+    constructor(props: UserProps, id?: UUID) {
+        super({
+            ...props,
+            createdAt: props.createdAt ?? new Date(),
+            updatedAt: props.updatedAt ?? new Date(),
+        }, id);
+    }
+
+    // Entities expose behavior, not just data.
+    static create(email: string, plainPassword: string, passwordService: PasswordService): User {
+        const hashedPassword = passwordService.createPassword(plainPassword);
+        return new User({
+            email,
+            password: hashedPassword.value,
+            name: 'New User',
+            role: Role.OPERATOR,
+        });
+    }
+
+    get email(): string { return this.props.email; }
+    get role(): Role { return this.props.role; }
+}
+```
+
+**Explanation**: An Entity is distinguished by its `UUID`. Unlike Value Objects, two entities with the same data but different IDs are different objects. The `static create()` factory ensures the entity is always created in a valid state — e.g. with the password already hashed. Other entities in the system: `Flow`, `UserConversation`, `ChatbotUser`, `Webhook`.
+
+**Recommendation**: Architecture Recommendation:
+
+Identity: Always use the UUID class for identifiers instead of plain number or string values.
+
+Encapsulation: Properties should preferably be accessible through getters. Do not modify `this.props` directly from outside; create domain methods (e.g., `updateCrmInfo`) to handle the change (to avoid immutability, the ORM will handle the `update` function).
+
+Mapping: Domain entities must be independent of the Prisma model. The domain's `User` contains business logic, while the Prisma model is only a persistence schema.
+
+**Additional*¨*
+If an entity has many fields to maintain, convert it into a builder domain with the necessary validations required before instantiation. The builder must be invoked within the created entity.
+
+```typescript
+export class ChatbotUser extends Entity<ChatbotUserProps> {
+  // Constructor privado: Nadie fuera de esta clase puede hacer 'new'
+  private constructor(props: ChatbotUserProps, id?: UUID) {
+    super(props, id);
+  }
+
+  // Para crear un usuario NUEVO (con lógica de negocio)
+  static create(props: CreateUserProps): ChatbotUser {
+    return new ChatbotUser({
+      ...props,
+      acceptsWhatsapp: props.acceptsWhatsapp ?? true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  // Para "despertar" un usuario de la DB (sin disparar lógica de negocio)
+  static reconstitute(props: ChatbotUserProps, id: UUID): ChatbotUser {
+    return new ChatbotUser(props, id);
+  }
+
+  static builder(): ChatbotUserBuilder {
+    return new ChatbotUserBuilder();
+  }
+}
+
+export class ChatbotUserBuilder {
+  private props: Partial<CreateProps> = {
+    acceptsWhatsapp: true,
+  };
+
+  setPhone(phone: string): this {
+    if (phone && phone.length > 20) {
+      throw ErrorFactory.create(
+        "validation-failed",
+        "El teléfono no puede superar 20 caracteres",
+      );
+    }
+    this.props.phone = phone;
+    return this;
+  }
+
+  setEmail(email: string): this {
+    if (email && email.length > 191) {
+      throw ErrorFactory.create(
+        "validation-failed",
+        "El email no puede superar 191 caracteres",
+      );
+    }
+    this.props.email = email;
+    return this;
+  }
+
+  setName(name: string): this {
+    if (name && name.length > 191) {
+      throw ErrorFactory.create(
+        "validation-failed",
+        "El nombre no puede superar 191 caracteres",
+      );
+    }
+    this.props.name = name;
+    return this;
+  }
+
+  setCrm(crmId: string, crmType: CrmType, crmStatus?: string): this {
+    this.props.crmId = crmId;
+    this.props.crmType = crmType;
+    this.props.crmStatus = crmStatus;
+    return this;
+  }
+
+  setAcceptsWhatsapp(accepts: boolean): this {
+    this.props.acceptsWhatsapp = accepts;
+    return this;
+  }
+
+  setCurrentFlow(flowId: string): this {
+    this.props.currentFlowId = flowId;
+    return this;
+  }
+
+  setCustomFields(fields: Record<string, unknown>): this {
+    this.props.customFields = fields;
+    return this;
+  }
+
+  build(): ChatbotUser {
+    if (!this.props.phone && !this.props.email) {
+      throw ErrorFactory.create(
+        "validation-failed",
+        "Se requiere al menos phone o email para crear un ChatbotUser",
+      );
+    }
+    return ChatbotUser.create(this.props as CreateProps);
+  }
+}
+```
+**Rules:**
+- **Location**: `src/domain/builders/`
+
+### Enum
+Zero ORM Leakage: Domain entities and Value Objects must never use Enums directly from the ORM (e.g., Prisma, TypeORM). Always use the mirrored Enums located in @domain/common/enum.
+
+**Rules:** Domain Enum Decoupling & Organization
+
+Naming Convention:
+- Files containing mirrored ORM Enums must be named entity-enum.common.ts.
+- Specific Domain-only Enums (not present in DB) should be named by their context: {context}.common.ts (e.g., healthly.common.ts).
+
+Single Source of Truth (Mirroring): When creating a mirrored Enum, the naming must be identical to the ORM version to facilitate mapping in the Infrastructure layer (Mappers).
+
+Location: All Enums must reside in src/domain/common/enum/ and be exported through the index.ts of that folder for clean imports.
+- **Location** — `src/domain/common/enum/entity-enum.common.ts`
+
+**Before:**
+```typescript
+//prisma/schema.prisma
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+```
+
+**After:**
+```typescript
+// @domain/common/enum/entity-enum.common.ts
+
+export enum UserStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+}
+```
+
+### Value Objects
+
+Value Objects describe aspects of the domain with no conceptual identity. They are defined entirely by their attributes, not by an identifier.
+
+**Rules:**
+- **No `id` field** — identity is determined by attribute values, not a unique key
+- **Immutable** — all properties must be `readonly`; use `Object.freeze(this)` in the 
+- Value Object related Enums: {name}.vo.ts.
+constructor
+- **Self-validating** — enforce invariants in the constructor; throw `AppError` on violation
+- **Equality by value** — implement `equals()` comparing attributes, not object references
+- **Location** — `src/domain/value-objects/`
+
+**Before:**
+```typescript
+// Phone passed as a raw string — no validation, no encapsulation
+async sendMessage(phone: string, text: string) {
+  await this.whatsappClient.send(phone, text); // Any string accepted, bugs at runtime
+}
+```
+
+**After:**
+```typescript
+// src/domain/value-objects/WhatsAppPhone.ts
+export class WhatsAppPhone {
+  public readonly value: string;
+  private static readonly PHONE_REGEX = /^\d{10,15}$/;
+
+  constructor(phone: string) {
+    const cleanPhone = phone.replace(/\D/g, ''); // strip non-numeric characters
+    this.verifyBusinessRules(cleanPhone);
+    this.value = cleanPhone;
+    Object.freeze(this);
+  }
+
+  private verifyBusinessRules(phone: string): void {
+    if (!WhatsAppPhone.PHONE_REGEX.test(phone)) {
+      throw ErrorFactory.create('validation', `Phone number ${phone} is not a valid WhatsApp format`);
+    }
+  }
+
+  equals(other: WhatsAppPhone): boolean {
+    return this.value === other.value;
+  }
+}
+```
+
+**Usage in a use case:**
+```typescript
+const phone = new WhatsAppPhone(dto.phoneNumber); // throws if invalid
+await this.messageSender.send(phone.value, dto.text);
+```
+
+**Explanation**: `WhatsAppPhone` is not just a string — it carries its own validation rules and guarantees that any phone number reaching the infrastructure layer is already clean and valid. The same pattern applies to other domain concepts like `Email`, `ConversationId`, or `FlowStepKey`.
+
+**Recommendation**: Avoid using database IDs for message components or transient states. The body of an automated response or a date range for an appointment in Odoo should be Value Objects. If the data does not require individual tracking throughout its lifecycle (such as a "Log ID"), treat it as an immutable attribute.
+
+**Best Practice**: Entities should encapsulate the business logic related to their domain concept and maintain the consistency of their internal state.
+
+**Enum Management**: If you require an enum related to the model, you must check it in: src/domain/value-objects/enums-objects.vo.ts
+
+How to update:
+1. Open src/domain/value-objects/enums-objects.vo.ts.
+
+2. Find the section that matches the model (or create one if it's new). 
+
+Important: It must be an exact copy of the enums defined in schema.prisma to avoid inconsistency errors when persisting data.
+
+### Aggregates
+
+Aggregates are clusters of domain objects that must be treated as a single unit. One entity acts as the **Aggregate Root** — all operations go through it to guarantee consistency.
+
+**Rules:**
+- Only the root is referenced from outside (repositories only return/save the root)
+- Child objects (e.g. `FlowStep`, `StepOption`) are never accessed directly — always through the root
+- The root enforces all invariants before any mutation
+
+**In this project — `Flow` is the aggregate root:**
+
+```
+Flow  (aggregate root)
+ └── FlowStep[]
+       └── StepOption[]
+```
+
+`FlowStep` and `StepOption` only make sense inside a `Flow`. You never fetch a `FlowStep` alone — you load the whole `Flow`.
+
+**Before:**
+```typescript
+// Steps managed independently — breaks aggregate boundary
+const step = await prisma.flowStep.create({
+    data: { flowId, type: 'options', content: '¿Cómo podemos ayudarte?' }
+});
+await prisma.stepOption.create({ data: { flowStepId: step.id, label: 'Soporte', value: 'support' } });
+```
+
+**After:**
+```typescript
+// src/domain/entities/Flow.ts
+export class Flow extends Entity<FlowProps> {
+    private _steps: FlowStep[];
+
+    constructor(props: FlowProps, id?: UUID) {
+        super({ ...props, createdAt: props.createdAt ?? new Date() }, id);
+        this._steps = props.steps ?? [];
+    }
+
+    // All mutations go through the root
+    addStep(step: FlowStep): void {
+        if (this.props.status === FlowStatus.ACTIVE) {
+            throw ErrorFactory.create('validation', 'Cannot modify an active flow', { flowId: this.id.value });
+        }
+        this._steps.push(step);
+    }
+
+    get steps(): ReadonlyArray<FlowStep> {
+        return this._steps;
+    }
+}
+
+// Repository loads the full aggregate
+@injectable()
+export class PrismaFlowRepository implements IFlowRepository {
+    async findById(id: string): Promise<Flow | null> {
+        const data = await this.prisma.flow.findUnique({
+            where: { id },
+            include: { flowSteps: { include: { options: true } } }
+        });
+        return data ? FlowMapper.toDomain(data) : null;
+    }
+}
+```
+
+**Explanation**: `Flow` is the root. Any business rule (e.g. "you can't add steps to an active flow") is enforced there, not in the use case. The repository always loads the full aggregate — never a `FlowStep` in isolation.
+
+### Repositories
+
+Repositories abstract data access behind an interface defined in the domain layer. The infrastructure layer provides the concrete implementation using Prisma, inheriting from a common base to manage the connection.
+
+**Rules:**
+- **Interface in domain**: `src/domain/repositories/IXxxRepository.ts` — no Prisma, no HTTP
+- **Implementation in infrastructure**: `src/infraestructure/database/prisma/PrismaXxxRepository.ts`
+- **Infrastructure Base**: All implementations must extend PrismaRepositoryBase to access the global database connection.  `src/infraestructure/database/facades/BaseRepository.ts`
+- **Always use `@injectable()`** — never import Prisma directly
+- **Return domain entities**, never raw Prisma objects — use a Mapper to convert
+- **Register in DI container**: bind `'IXxxRepository'` → `PrismaXxxRepository` in `src/infraestructure/DI/` (If you don't have an alias, add it to global-symbol.ts)
+
+**Before:**
+```typescript
+// Direct Prisma access from use case — bypasses domain boundary
+const data = await prisma.flow.findUnique({ where: { id } });
+```
+
+**After:**
+
+```typescript
+// src/domain/repositories/IFlowRepository.ts
+export interface IFlowRepository {
+    findById(id: string): Promise<Flow | null>;
+    findAll(): Promise<Flow[]>;
+    save(flow: Flow): Promise<void>;
+    delete(id: string): Promise<void>;
+}
+```
+
+```typescript
+// src/infraestructure/database/prisma/PrismaFlowRepository.ts
+import { injectable } from 'tsyringe';
+import { IFlowRepository } from '../../../domain/repositories/IFlowRepository';
+import { Flow } from '../../../domain/entities/Flow.entity';
+import { FlowMapper } from '../../../app/mappers/FlowMapper';
+import { PrismaRepositoryBase } from '../facades/BaseRepository';
+
+@injectable()
+export class PrismaFlowRepository extends PrismaRepositoryBase implements IFlowRepository {
+
+    async findById(id: string): Promise<Flow | null> {
+        const data = await this.prisma.flow.findUnique({
+            where: { id },
+            include: { flowSteps: { include: { options: true } } }
+        });
+        return data ? FlowMapper.toDomain(data) : null;
+    }
+
+    async save(flow: Flow): Promise<void> {
+        const plain = FlowMapper.toPersistence(flow);
+        await this.prisma.flow.upsert({
+            where: { id: plain.id },
+            create: plain,
+            update: plain
+        });
+    }
+
+    async delete(id: string): Promise<void> {
+        await this.prisma.flow.delete({ where: { id } });
+    }
+
+    async findAll(): Promise<Flow[]> {
+        const data = await this.prisma.flow.findMany({
+            include: { flowSteps: { include: { options: true } } }
+        });
+        return data.map(FlowMapper.toDomain);
+    }
+}
+```
+
+```typescript
+// src/infraestructure/DI/container.ts
+container.register('IFlowRepository', { useClass: PrismaFlowRepository });
+```
+
+```typescript
+// Use case — depends on the interface, not the implementation
+@injectable()
+export class GetFlowUseCase {
+    constructor(
+        @inject('IFlowRepository') private flowRepo: IFlowRepository
+    ) {}
+
+    async execute(id: string): Promise<Flow> {
+        const flow = await this.flowRepo.findById(id);
+        if (!flow) throw ErrorFactory.create('not-found', 'Flow not found', { id });
+        return flow;
+    }
+}
+```
+
+**Explanation**: The use case only knows the `IFlowRepository` interface — it can be swapped for an in-memory mock in tests without changing any business logic.
+
+### Domain Services
+
+Domain Services contain business logic that involves multiple entities or value objects but doesn't naturally belong to any single one of them.
+
+**When to use a Domain Service (vs. putting logic in the entity):**
+- The logic requires **more than one entity** to make a decision
+- The logic involves a domain concept that has no clear "owner" entity
+- Placing it in an entity would introduce an unwanted dependency
+
+**Rules:**
+- **Location**: `src/domain/services/`
+- **No infrastructure dependencies**: no Prisma, no HTTP, no external APIs
+- **Pure domain logic only**: receives domain objects, returns domain objects or primitives
+- **Injected via TSyringe** when used from a use case: `@injectable()` + `@inject('IFlowNavigationService')`
+
+**Before:**
+```typescript
+// Navigation logic scattered in the use case — not reusable, hard to test
+const nextStep = flow.steps.find(s => s.stepIndex === current.stepIndex + 1);
+if (!nextStep && current.type === 'options') {
+    const selected = current.options.find(o => o.value === userAnswer);
+    return selected?.nextStepId ?? null;
+}
+```
+
+**After:**
+```typescript
+// src/domain/services/FlowNavigationService.ts
+import { injectable } from 'tsyringe';
+import { Flow } from '../entities/Flow.entity';
+import { FlowStep } from '../entities/FlowStep.entity';
+import { ErrorFactory } from '../exceptions/ErrorFactory';
+
+@injectable()
+export class FlowNavigationService {
+
+    /**
+     * Resolves the next step for a conversation given the current step and the user's answer.
+     * Handles linear navigation, option branching, and AI handoff transitions.
+     */
+    resolveNextStep(flow: Flow, currentStep: FlowStep, userAnswer?: string): FlowStep | null {
+        if (currentStep.type === 'options') {
+            const selected = currentStep.options.find(o => o.value === userAnswer);
+            if (!selected) {
+                throw ErrorFactory.create('validation', 'Invalid option selected', {
+                    stepId: currentStep.id,
+                    answer: userAnswer
+                });
+            }
+            if (!selected.nextStepId) return null; // end of flow
+            return flow.steps.find(s => s.id === selected.nextStepId) ?? null;
+        }
+
+        // Linear navigation for text/input steps
+        const nextIndex = currentStep.stepIndex + 1;
+        return flow.steps.find(s => s.stepIndex === nextIndex) ?? null;
+    }
+}
+```
+
+```typescript
+// Use case consuming the domain service
+@injectable()
+export class ProcessIncomingMessageUseCase {
+    constructor(
+        @inject('IFlowRepository') private flowRepo: IFlowRepository,
+        @inject('FlowNavigationService') private navigation: FlowNavigationService
+    ) {}
+
+    async execute(dto: ProcessMessageDTO): Promise<void> {
+        const flow = await this.flowRepo.findById(dto.flowId);
+        if (!flow) throw ErrorFactory.create('not-found', 'Flow not found', { id: dto.flowId });
+
+        const currentStep = flow.steps.find(s => s.id === dto.currentStepId);
+        const nextStep = this.navigation.resolveNextStep(flow, currentStep!, dto.userAnswer);
+        // ...
+    }
+}
+```
+
+**Explanation**: `FlowNavigationService` knows how to navigate between steps — a rule that spans `Flow`, `FlowStep`, and `StepOption`. Neither entity alone is the right owner. The service stays pure (no Prisma, no HTTP) so it's trivially testable with plain objects.
+
+### Additional Recommendations
+
+**Use of Factories**
+
+Factories encapsulate the logic of creating complex objects, guaranteeing that every instance is born in a valid and consistent state. The project already uses this pattern in two key places:
+
+**1. `ErrorFactory` — domain and application errors**
+
+Located in `src/domain/exceptions/`. Centralizes error creation so every error has a consistent shape, HTTP code, and log context.
+
+```typescript
+// Throw a known domain error
+throw ErrorFactory.create('not-found', 'Flow not found', { id });
+throw ErrorFactory.create('validation', 'Invalid option selected', { stepId, answer });
+throw ErrorFactory.create('unauthorized', 'Token expired');
+
+// Convert a Zod validation error
+import { ErrorFactory } from '../../domain/exceptions/ErrorFactory';
+const result = SendMessageSchema.safeParse(raw);
+if (!result.success) throw ErrorFactory.fromZodError(result.error);
+```
+
+**2. `EmailTemplateFactory` — transactional email templates**
+
+Located in `src/infraestructure/services/` (or `src/app/`). Builds the HTML/text payload for Brevo (or any email provider) without scattering template logic across services.
+
+```typescript
+// Build a welcome email payload
+const payload = EmailTemplateFactory.welcome({ name: user.name, email: user.email });
+await this.emailService.send(payload);
+
+// Build a password reset email
+const payload = EmailTemplateFactory.passwordReset({ resetUrl, expiresIn: '15m' });
+await this.emailService.send(payload);
+```
+
+**When to add a new Factory:**
+- Creating an entity/aggregate requires more than 2 steps or cross-cutting validation → add a `XxxFactory` in `src/domain/`
+- Building a complex external payload (webhook body, AI prompt, notification) → add a factory in `src/infraestructure/` or `src/app/`
+
+**Improvement in Relationship Modeling**
+
+Relationships between entities and aggregates must be clear and consistent with business rules.
+
+**Recommendation**: Review and possibly redesign relationships between entities to ensure they accurately reflect domain needs and rules. This may include removing unnecessary relationships or adding new relationships that facilitate business operations.
+
+**Domain Events Integration (PGMQ)**
+
+The project implements domain events over **PGMQ** (PostgreSQL message queue). Events are published after a business operation succeeds and consumed by a worker that dispatches them to registered handlers.
+
+**Flow:**
+```
+Use case → eventBus.publish(event) → PGMQ queue → Worker → Handler (side effects)
+```
+
+**Queues:**
+- `domain_events` — primary event queue
+- `domain_event_dlq` — dead letter queue after `MAX_RETRIES` (currently 3) exhausted
+
+**1. Define a domain event** (`src/domain/events/`)
+```typescript
+import { DomainEvent } from './domain-event';
+
+type UserCreatedPayload = { userId: string; email: string };
+
+export class UserCreatedEvent implements DomainEvent<UserCreatedPayload> {
+    id = crypto.randomUUID();
+    name = 'user.created';
+    occurredAt = new Date();
+    constructor(public payload: UserCreatedPayload) {}
+}
+```
+
+**2. Publish from a use case** — always after persistence succeeds
+```typescript
+import { inject, injectable } from 'tsyringe';
+import { IEventBus } from '@/domain/interfaces/ports/event-bus.port';
+import { DI } from '@/infraestructure/DI/global-symbol';
+
+@injectable()
+export class CreateUserUseCase {
+    constructor(
+        @inject(DI.EventBus) private eventBus: IEventBus
+    ) {}
+
+    async execute(dto: CreateUserDTO): Promise<void> {
+        // 1) persist first
+        // 2) then publish
+        await this.eventBus.publish(new UserCreatedEvent({ userId, email: dto.email }));
+    }
+}
+```
+
+**3. Create a handler** (`src/infraestructure/event-bus/handlers/`)
+```typescript
+import { injectable } from 'tsyringe';
+import { DomainEventHandler } from '@/domain/events/domain-event';
+
+@injectable()
+export class UserCreatedHandler implements DomainEventHandler<UserCreatedEvent> {
+    eventName = 'user.created';
+
+    async handle(event: UserCreatedEvent): Promise<void> {
+        // Side effects only: send welcome email, notify webhook, update metrics
+    }
+}
+```
+
+**4. Register handler in bootstrap** (`src/infraestructure/event-bus/bootstrap-event-bus.ts`)
+```typescript
+const handler = container.resolve(UserCreatedHandler);
+eventRegistry.register(handler);
+```
+
+**Common mistakes to avoid:**
+- Publishing before persistence completes
+- Injecting `PGMQEventBus` directly instead of `IEventBus`
+- Forgetting to register the handler in bootstrap
+- Event `name` mismatch between event class and handler `eventName`
+- Writing business logic inside handlers (handlers = side effects only)
+
+> Full reference: `docs/architecture/event-bus-usage-guide.md`
+
+## SOLID and DRY Principles
+
+### SOLID Principles
+
+SOLID principles are five object-oriented design principles that help create more understandable, flexible, and maintainable systems.
+
+#### Single Responsibility Principle (SRP)
+
+Each class should have a single responsibility or reason to change.
+
+**Before:**
+```typescript
+// Controller handling validation, business logic, and DB access all at once
+export class FlowController {
+    async create(req: Request, res: Response) {
+        if (!req.body.name) return res.status(400).json({ error: 'Name required' });
+        const exists = await prisma.flow.findFirst({ where: { name: req.body.name } });
+        if (exists) return res.status(409).json({ error: 'Flow already exists' });
+        const flow = await prisma.flow.create({ data: req.body });
+        res.status(201).json(flow);
+    }
+}
+```
+
+**After:**
+```typescript
+// Controller: only HTTP in/out
+export class FlowController {
+    constructor(@inject('CreateFlowUseCase') private useCase: CreateFlowUseCase) {}
+
+    async create(req: Request, res: Response) {
+        const result = await this.useCase.execute(req.body);
+        return ResponseBuilder.sendSuccess(res, SuccessFactory.create('flow-created', result));
+    }
+}
+
+// Use case: orchestration only
+@injectable()
+export class CreateFlowUseCase {
+    constructor(@inject('IFlowRepository') private flowRepo: IFlowRepository) {}
+
+    async execute(raw: unknown): Promise<Flow> {
+        const dto = CreateFlowSchema.parse(raw);                       // validation
+        const existing = await this.flowRepo.findByName(dto.name);
+        if (existing) throw ErrorFactory.create('conflict', 'Flow name already exists', { name: dto.name });
+        const flow = Flow.create(dto);                                 // domain rule
+        await this.flowRepo.save(flow);
+        return flow;
+    }
+}
+```
+
+**Rule**: Controller → HTTP only. Use case → orchestration only. Entity → business rules only. Repository → data access only.
+
+#### Open/Closed Principle (OCP)
+
+Software entities should be open for extension but closed for modification.
+
+**Before:**
+```typescript
+// Adding a new channel requires modifying this class
+export class MessageSenderService {
+    async send(channel: string, to: string, message: string) {
+        if (channel === 'whatsapp') {
+            await whatsappClient.send(to, message);
+        } else if (channel === 'webchat') {
+            await socketIO.emit(to, message);
+        }
+        // Adding Telegram requires editing this method ❌
+    }
+}
+```
+
+**After:**
+```typescript
+// Domain interface — closed for modification
+export interface IMessageAdapter {
+    send(to: string, message: string): Promise<void>;
+    readonly channel: string;
+}
+
+// Each adapter is a self-contained extension — open for extension ✅
+@injectable()
+export class WhatsAppAdapter implements IMessageAdapter {
+    readonly channel = 'whatsapp';
+    async send(to: string, message: string): Promise<void> { /* ... */ }
+}
+
+@injectable()
+export class WebChatAdapter implements IMessageAdapter {
+    readonly channel = 'webchat';
+    async send(to: string, message: string): Promise<void> { /* ... */ }
+}
+
+// Adding Telegram = new class only, no modification to existing code
+@injectable()
+export class TelegramAdapter implements IMessageAdapter {
+    readonly channel = 'telegram';
+    async send(to: string, message: string): Promise<void> { /* ... */ }
+}
+```
+
+**Rule**: Use interfaces + adapters to extend behavior without touching existing classes.
+
+#### Liskov Substitution Principle (LSP)
+
+Any implementation of an interface must be substitutable for any other implementation without breaking callers.
+
+**Before:**
+```typescript
+// This adapter breaks the contract — callers can't trust it
+export class MockWhatsAppAdapter implements IMessageAdapter {
+    async send(to: string, message: string): Promise<void> {
+        throw new Error("Not implemented"); // ❌ breaks substitutability
+    }
+}
+```
+
+**After:**
+```typescript
+// Test double that fully honors the contract
+export class InMemoryMessageAdapter implements IMessageAdapter {
+    readonly channel = 'test';
+    public sent: Array<{ to: string; message: string }> = [];
+
+    async send(to: string, message: string): Promise<void> {
+        this.sent.push({ to, message }); // fulfills the contract, no throws
+    }
+}
+
+// Use case test — swaps real adapter with in-memory, behavior unchanged
+const adapter = new InMemoryMessageAdapter();
+container.register('IMessageAdapter', { useValue: adapter });
+await useCase.execute(dto);
+expect(adapter.sent).toHaveLength(1);
+```
+
+**Rule**: The project uses composition over inheritance. Any `IMessageAdapter`, `IFlowRepository`, or `IEventBus` implementation must fully honor its contract so it can be swapped in tests or production without callers noticing.
+
+#### Interface Segregation Principle (ISP)
+
+Many specific interfaces are better than a single general interface.
+
+**Before:**
+```typescript
+// One fat interface forces implementors to provide methods they don't need
+interface IConversationService {
+    sendMessage(to: string, text: string): Promise<void>;
+    receiveWebhook(payload: unknown): Promise<void>;
+    generateAIResponse(prompt: string): Promise<string>;
+    archiveConversation(id: string): Promise<void>;
+}
+```
+
+**After:**
+```typescript
+// Each interface covers one concern
+export interface IMessageAdapter {
+    send(to: string, message: string): Promise<void>;
+}
+
+export interface IWebhookHandler {
+    handle(payload: unknown): Promise<void>;
+}
+
+export interface IAIService {
+    complete(prompt: string, options?: AIOptions): Promise<string>;
+}
+
+// WhatsAppAdapter only implements what it actually does
+@injectable()
+export class WhatsAppAdapter implements IMessageAdapter, IWebhookHandler {
+    async send(to: string, message: string): Promise<void> { /* ... */ }
+    async handle(payload: unknown): Promise<void> { /* ... */ }
+}
+
+// BedrockAIService only implements the AI contract
+@injectable()
+export class BedrockAIService implements IAIService {
+    async complete(prompt: string): Promise<string> { /* ... */ }
+}
+```
+
+**Rule**: Keep interfaces small and focused. Use cases should depend on the smallest interface that serves their need.
+
+#### Dependency Inversion Principle (DIP)
+
+High-level modules (use cases) must not depend on low-level modules (Prisma, WhatsApp SDK). Both depend on abstractions (interfaces).
+
+**Before:**
+```typescript
+// Use case coupled to concrete Prisma and WhatsApp implementations
+export class SendMessageUseCase {
+    private prisma = new PrismaClient();             // ❌ concrete
+    private wa = new WhatsAppCloudAPI(process.env.TOKEN); // ❌ concrete
+
+    async execute(dto: SendMessageDTO): Promise<void> {
+        const conv = await this.prisma.userConversation.findUnique({ where: { id: dto.conversationId } });
+        await this.wa.sendText(conv.phoneNumber, dto.text);
+    }
+}
+```
+
+**After:**
+```typescript
+// Use case depends only on interfaces — injected by TSyringe
+@injectable()
+export class SendMessageUseCase {
+    constructor(
+        @inject('IConversationRepository') private convRepo: IConversationRepository,
+        @inject('IMessageAdapter')         private adapter: IMessageAdapter
+    ) {}
+
+    async execute(dto: SendMessageDTO): Promise<void> {
+        const dto = SendMessageSchema.parse(raw);
+        const conversation = await this.convRepo.findById(dto.conversationId);
+        if (!conversation) throw ErrorFactory.create('not-found', 'Conversation not found', { id: dto.conversationId });
+        await this.adapter.send(conversation.phoneNumber, dto.text);
+    }
+}
+```
+
+**Rule**: Use cases declare what they need via interfaces. TSyringe resolves the correct concrete class at runtime. Tests inject fakes without touching production code.
+
+### DRY (Don't Repeat Yourself)
+
+Each piece of knowledge must have a single, authoritative representation in the codebase.
+
+**Before:**
+```typescript
+// Same Zod validation duplicated across two use cases
+export class CreateFlowUseCase {
+    async execute(raw: unknown) {
+        const dto = z.object({ name: z.string().min(3), flowType: z.enum(['STANDARD','AI_ONLY']) }).parse(raw);
+        // ...
+    }
+}
+
+export class UpdateFlowUseCase {
+    async execute(raw: unknown) {
+        const dto = z.object({ name: z.string().min(3), flowType: z.enum(['STANDARD','AI_ONLY']) }).parse(raw); // ❌ duplicated
+        // ...
+    }
+}
+```
+
+**After:**
+```typescript
+// src/infraestructure/http/controllers/schemas/flow.schema.ts — single source of truth
+export const FlowBaseSchema = z.object({
+    name: z.string().min(3),
+    flowType: z.enum(['STANDARD', 'ROUTER', 'FLOW_TO_AI', 'AI_ONLY'])
+});
+
+export const CreateFlowSchema = FlowBaseSchema.extend({ description: z.string().optional() });
+export const UpdateFlowSchema = FlowBaseSchema.partial();
+
+export type CreateFlowDTO = z.infer<typeof CreateFlowSchema>;
+export type UpdateFlowDTO = z.infer<typeof UpdateFlowSchema>;
+
+// Use cases just import — no duplication
+export class CreateFlowUseCase {
+    async execute(raw: unknown) {
+        const dto = CreateFlowSchema.parse(raw);
+        // ...
+    }
+}
+export class UpdateFlowUseCase {
+    async execute(raw: unknown) {
+        const dto = UpdateFlowSchema.parse(raw);
+        // ...
+    }
+}
+```
+
+**Rule**: Shared validation → one Zod schema file. Shared mapping → one Mapper. Shared error codes → `ErrorFactory`. If you copy-paste more than 3 lines of logic, extract it.
+
+## Coding Standards
+
+### Naming Conventions
+
+- **Variable Naming**: Use camelCase for variables and functions (e.g., `flowId`, `findFlowById`)
+- **Class Naming**: Use PascalCase for classes and interfaces (e.g., `Flow`, `FlowRepository`)
+- **Constants Naming**: Use UPPER_SNAKE_CASE for constants (e.g., `MAX_STEPS_PER_FLOW`)
+- **Type Naming**: Use PascalCase for types and interfaces (e.g., `FlowProps`, `IFlowRepository`)
+- **File Naming**: Use camelCase for file names (e.g., `sendMessageUseCase.ts`, `whatsappWebhookController.ts`)
+
+**Examples:**
+
+```typescript
+// Good: All in English, DatiHub domain names
+export class PrismaFlowRepository extends PrismaRepositoryBase implements IFlowRepository {
+    async findById(flowId: string): Promise<Flow | null> {
+        const data = await this.prisma.flow.findUnique({
+            where: { id: flowId },
+            include: { steps: { include: { options: true } } }
+        });
+        return data ? Flow.fromPrimitives(data) : null;
+    }
+}
+
+// Avoid: Non-English comments or names
+export class RepositorioFlujo {
+    async buscarPorId(idFlujo: string): Promise<Flujo | null> {
+        // Buscar flujo por ID en la base de datos
+    }
+}
+```
+
+**Error Messages and Logs:**
+
+```typescript
+// Good: English error messages with ErrorFactory
+throw ErrorFactory.create('not-found', 'Flow not found', { flowId });
+logger.error('Failed to send message', { error: error.message, conversationId });
+
+// Avoid: raw new Error or non-English messages
+throw new Error('Flujo no encontrado');
+logger.error('Error al enviar mensaje');
+```
+
+### TypeScript Usage
+
+- **Strict Mode**: Always enable strict mode in `tsconfig.json`
+- **Type Definitions**: Use explicit types for function parameters and return values
+- **Interfaces**: Define interfaces for complex data structures
+- **Avoid `any`**: Use `unknown` or specific types instead of `any` when possible
+
+```typescript
+// Good: Explicit types
+async function findCandidateById(id: number): Promise<Candidate | null> {
+    // implementation
+}
+
+// Avoid: Using any
+function processData(data: any): any {
+    // implementation
+}
+```
+
+### Error Handling
+
+- **AppError / ErrorFactory**: Use `ErrorFactory.create()` for domain errors — never `new Error()`
+- **Error Middleware**: `ErrorHandler` middleware in `src/infraestructure/http/middleware/` catches all unhandled errors
+- **Controller pattern**: throw — the middleware handles the response
+
+```typescript
+// In domain / use case
+throw ErrorFactory.create('not-found', 'Conversation not found', { conversationId });
+throw ErrorFactory.create('validation', 'Invalid flow step', { stepId });
+throw ErrorFactory.create('unauthorized', 'Token expired');
+
+// In controller — let errors propagate
+try {
+    const result = await useCase.execute(dto);
+    return ResponseBuilder.sendSuccess(res, SuccessFactory.create('conversation-found', result));
+} catch (error) {
+    throw error; // ErrorMiddleware handles it
+}
+```
+
+### Validation Patterns
+
+- **Zod schemas**: Define all input schemas in `src/infraestructure/http/controllers/schemas/` using Zod
+- **Validate at application boundary**: Validate in the use case before executing business logic
+- **Type from schema**: Use `z.infer<>` to derive TypeScript types — never duplicate type definitions
+
+```typescript
+// src/infraestructure/http/controllers/schemas/send-message.schema.ts
+import { z } from 'zod';
+
+export const SendMessageSchema = z.object({
+    conversationId: z.string().uuid(),
+    text: z.string().min(1).max(4096),
+    channel: z.enum(['whatsapp', 'webchat'])
+});
+
+export type SendMessageDTO = z.infer<typeof SendMessageSchema>;
+
+// In use case
+export class SendMessageUseCase {
+    async execute(raw: unknown): Promise<void> {
+        const dto = SendMessageSchema.parse(raw); // throws ZodError if invalid
+        // ... business logic
+    }
+}
+```
+
+### Logging Standards
+
+- **Winston**: Use the centralized Winston logger — do NOT use `console.log`
+- **Log Levels**: `info` for normal flow, `error` for failures, `warn` for suspicious states, `debug` for dev tracing
+- **Structured context**: Always pass a context object as the second argument
+
+```typescript
+import { logger } from '../../../infraestructure/logger';
+
+logger.info('Conversation started', { conversationId, userId, channel });
+logger.error('Failed to send message', { error: error.message, conversationId });
+logger.warn('Flow step not found, falling back to default', { stepId, flowId });
+```
+
+## API Design Standards
+
+### REST Endpoints
+
+- **RESTful Naming**: Use RESTful conventions for endpoint naming
+- **HTTP Methods**: Use appropriate HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- **Resource-Based URLs**: URLs should represent resources, not actions
+
+Real DatiHub routes:
+
+```typescript
+// Webhooks (inbound messages from channels)
+POST   /webhook/whatsapp          // WhatsApp Cloud API inbound message
+POST   /webhook/webchat           // WebChat widget inbound message
+
+// Flows
+GET    /flows                     // List all flows
+GET    /flows/:id                 // Get flow by ID (with steps and options)
+POST   /flows                     // Create new flow
+PATCH  /flows/:id                 // Update flow
+DELETE /flows/:id                 // Delete flow
+
+// Conversations
+GET    /conversations             // List conversations
+GET    /conversations/:id         // Get conversation with messages
+PATCH  /conversations/:id/close   // Close conversation
+
+// Users
+GET    /users/:id                 // Get user profile
+POST   /users                     // Create user
+PATCH  /users/:id                 // Update user
+```
+
+### Request/Response Patterns
+
+- **JSON Format**: Use JSON for request and response bodies
+- **ResponseBuilder + SuccessFactory**: Always use `ResponseBuilder.sendSuccess()` together with `SuccessFactory.create()` for success responses — never return raw JSON
+- **Status Codes**: Use appropriate HTTP status codes
+
+```typescript
+// In controller — success
+import { ResponseBuilder } from '../../../infraestructure/http/helpers/ResponseBuilder';
+import { SuccessFactory } from '../../../domain/exceptions/SuccessFactory';
+
+const result = await useCase.execute(dto);
+return ResponseBuilder.sendSuccess(
+    res,
+    SuccessFactory.create('flow-found', result)
+);
+
+// Resulting JSON shape
+{
+    "success": true,
+    "code": "flow-found",
+    "data": { ... }
+}
+
+// In controller — errors are thrown, ErrorMiddleware produces:
+{
+    "success": false,
+    "code": "not-found",
+    "message": "Flow not found",
+    "details": { "flowId": "abc-123" }
+}
+```
+
+### Error Response Format
+
+- **ErrorMiddleware**: All errors are caught by `ErrorHandler` in `src/infraestructure/http/middleware/ErrorHandler.ts`
+- **Never send raw error responses**: Always throw — never call `res.status().json()` for errors in controllers
+- **ErrorFactory produces AppError**: shapes are mapped to HTTP responses by the middleware
+
+```typescript
+// 400 — validation error (thrown by Zod parse)
+{
+    "success": false,
+    "code": "validation",
+    "message": "Validation failed",
+    "details": [{ "path": "text", "message": "Required" }]
+}
+
+// 404 — domain not-found
+{
+    "success": false,
+    "code": "not-found",
+    "message": "Flow not found",
+    "details": { "flowId": "abc-123" }
+}
+
+// 401 — unauthorized
+{
+    "success": false,
+    "code": "unauthorized",
+    "message": "Token expired"
+}
+```
+
+### CORS Configuration
+
+- **Enable CORS**: Configure CORS to allow frontend origin
+- **Secure Configuration**: Only allow specific origins in production
+- **Credentials**: Configure credentials handling appropriately
+
+```typescript
+import cors from 'cors';
+
+const corsOptions = {
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+};
+
+app.use(cors(corsOptions));
+```
+
+## Database Patterns
+
+### Prisma Schema
+
+- **Single Source of Truth**: `prisma/schema.prisma` is the single source of truth for database structure
+- **Relationships**: Define relationships using Prisma relations
+- **Naming Conventions**: Use consistent naming conventions (camelCase for fields, PascalCase for models)
+
+### Migrations
+
+- **Version Control**: All database changes must be version-controlled through migrations
+- **Migration Naming**: Use descriptive names for migrations
+- **Review Migrations**: Review migration files before applying
+
+```bash
+# Create migration
+npx prisma migrate dev --name descriptive_migration_name
+
+# Apply migrations in production
+npx prisma migrate deploy
+```
+
+### Repository Pattern
+
+- **Base class**: All Prisma repositories extend `PrismaRepositoryBase` from `src/infraestructure/database/facades/BaseRepository.ts`
+- **Interface in domain**: Define `IXxxRepository` in `src/domain/repositories/`
+- **Implementation in infra**: Implement in `src/infraestructure/database/prisma/`
+- **DI token alias**: Register a string alias in `src/infraestructure/DI/global-symbol.ts`
+
+```typescript
+// src/domain/repositories/IFlowRepository.ts
+export interface IFlowRepository {
+    findById(id: string): Promise<Flow | null>;
+    findAll(): Promise<Flow[]>;
+    save(flow: Flow): Promise<void>;
+    delete(id: string): Promise<void>;
+}
+
+// src/infraestructure/database/prisma/PrismaFlowRepository.ts
+import { injectable, inject } from 'tsyringe';
+import { PrismaRepositoryBase } from '../facades/BaseRepository';
+
+@injectable()
+export class PrismaFlowRepository extends PrismaRepositoryBase implements IFlowRepository {
+    async findById(id: string): Promise<Flow | null> {
+        const data = await this.prisma.flow.findUnique({
+            where: { id },
+            include: { steps: { include: { options: true } } }
+        });
+        return data ? Flow.fromPrimitives(data) : null;
+    }
+
+    async save(flow: Flow): Promise<void> {
+        await this.prisma.flow.upsert({
+            where: { id: flow.id },
+            create: flow.toPlain(),
+            update: flow.toPlain()
+        });
+    }
+}
+
+// src/infraestructure/DI/global-symbol.ts
+export const TOKENS = {
+    IFlowRepository: 'IFlowRepository',
+    // ...
+};
+
+// Registration in DI container
+container.registerSingleton<IFlowRepository>(TOKENS.IFlowRepository, PrismaFlowRepository);
+```
+
+> **Aviso**: Nunca inyectar `PrismaClient` directamente en use cases — siempre a través del repositorio.
+
+## Testing Standards
+
+The project has strict requirements for code quality and maintainability. These are the unit testing standards and best practices that must be applied. 
+
+### Test File Structure
+- Use descriptive test file names: `[componentName].test.ts`
+- Place test files alongside the source code they test
+- Use **Vitest** as the testing framework with TypeScript support
+- Maintain 90% coverage threshold for branches, functions, lines, and statements
+
+
+### Test Organization Pattern
+Template:
+```typescript
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+describe('[ComponentName] - [methodName]', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('should_[expected_behavior]_when_[condition]', () => {
+    it('should [specific test case]', async () => {
+      // Arrange
+      // Act  
+      // Assert
+    });
+  });
+});
+```
+
+Real example:
+```typescript
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { FlowNavigationService } from '../../../src/domain/services/FlowNavigationService';
+import { Flow } from '../../../src/domain/entities/Flow';
+
+describe('FlowNavigationService - resolveNextStep', () => {
+    let service: FlowNavigationService;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        service = new FlowNavigationService();
+    });
+
+    it('should return next step when current step has a direct successor', () => {
+        // Arrange
+        const flow = Flow.fromPrimitives({ id: 'f1', steps: [
+            { id: 's1', order: 1, nextStepId: 's2' },
+            { id: 's2', order: 2, nextStepId: null }
+        ]});
+
+        // Act
+        const nextStep = service.resolveNextStep(flow, 's1', null);
+
+        // Assert
+        expect(nextStep?.id).toBe('s2');
+    });
+});
+```
+
+
+
+### Test Case Naming Convention
+- Use descriptive, behavior-driven naming: `should_[expected_behavior]_when_[condition]`
+- Group related test cases under descriptive `describe` blocks
+- Use snake_case for describe blocks and camelCase for individual tests
+
+### Test Structure (AAA Pattern)
+Always follow the Arrange-Act-Assert pattern:
+```typescript
+it('should close conversation successfully when conversation is active', async () => {
+  // Arrange — Set up test data and mocks
+  const conversationId = 'conv-uuid-123';
+  const mockConversation = { id: conversationId, status: 'active' };
+  const mockRepo = { findById: vi.fn().mockResolvedValue(mockConversation), save: vi.fn() };
+  const useCase = new CloseConversationUseCase(mockRepo);
+
+  // Act — Execute the function under test
+  await useCase.execute({ conversationId });
+
+  // Assert — Verify the expected behavior
+  expect(mockRepo.save).toHaveBeenCalledTimes(1);
+  expect(mockRepo.findById).toHaveBeenCalledWith(conversationId);
+});
+```
+
+Assertion pattern:
+- Use specific matchers: `toHaveBeenCalledWith()`, `toHaveBeenCalledTimes()`
+- Verify both successful operations and error conditions
+- Check that mocks were called with correct parameters
+- Assert on return values and side effects
+
+
+
+
+
+
+
+
+### Mocking Standards
+
+- Mock all external dependencies (repositories, services, database clients)
+- Mock repository layers in use case tests
+- Mock use case layers in controller tests
+- Use `vi.mock()` at the top of test files for module-level mocking
+- Create mock instances with realistic data structures
+- Clear all mocks in `beforeEach()` using `vi.clearAllMocks()` to ensure test isolation
+
+
+### Test Coverage Requirements
+
+- **Comprehensive test coverage**: Include these test categories for each function:
+1. **Happy Path Tests**: Valid inputs producing expected outputs
+2. **Error Handling Tests**: Invalid inputs, missing data, database errors
+3. **Edge Cases**: Boundary values, null/undefined inputs, empty data
+4. **Validation Tests**: Input validation, business rule enforcement
+5. **Integration Points**: External service calls, database operations
+
+- **Threshold**: 90% for branches, functions, lines, and statements
+- **Coverage Reports**: Generate coverage reports with `npm run coverage`
+- **Coverage Files**: Coverage reports in `coverage/` directory adding the date, like YYYYMMDD-backend-coverage.md
+
+
+### Error Testing
+- Test both expected errors and unexpected errors
+- Verify error messages are descriptive and helpful
+- Test error propagation through service layers
+- Ensure proper HTTP status codes in controller tests
+
+### Controller Testing Specifics
+- Mock the service layer completely
+- Test HTTP request/response handling
+- Verify parameter parsing and validation
+- Test error response formatting
+- Use realistic Express Request/Response mocks
+
+### Service Testing Specifics
+- Mock domain models and repositories
+- Test business logic in isolation
+- Verify data transformation and validation
+- Test error handling and edge cases
+- Mock external dependencies (Prisma, validators)
+
+### Database Testing
+- Mock Prisma client and all database operations
+- Test both successful and failed database operations
+- Verify correct database queries and parameters
+- Test transaction handling and rollback scenarios
+
+### Async Testing
+- Always use `async/await` for asynchronous operations
+- Use `Promise.allSettled()` for testing concurrent operations
+- Properly handle promise rejections in tests
+- Test timeout scenarios where applicable
+
+### Test Data Management
+- Use factory functions for creating test data
+- Keep test data consistent and realistic
+- Avoid hardcoded values in multiple places
+- Use meaningful test data that reflects real-world scenarios
+
+### Integration Testing
+
+- **Controller Testing**: Test HTTP request/response handling
+- **Database Testing**: Test repository implementations with database
+- **End-to-End Flow**: Test complete request flows
+
+
+### Code Quality Standards
+
+#### TypeScript Usage
+- Use strict typing for all test parameters and return values
+- Define proper interfaces for mock data
+- Use type assertions sparingly and with proper justification
+- Leverage TypeScript's type system for better test reliability
+
+#### Documentation
+- Write clear, descriptive test names that explain the scenario
+- Add comments for complex test setups
+- Document any special test conditions or edge cases
+- Keep test code as readable as production code
+
+#### Performance Considerations
+- Keep tests fast and focused
+- Avoid unnecessary async operations in tests
+- Use appropriate mock strategies to avoid real I/O
+- Group related tests to minimize setup/teardown overhead
+
+### Integration with Development Workflow
+- Run tests before every commit
+- Ensure all tests pass before merging
+- Use test-driven development when appropriate
+- Update tests when modifying existing functionality
+
+### Common Anti-Patterns to Avoid
+- Don't test implementation details, test behavior
+- Don't create overly complex test setups
+- Don't ignore failing tests or skip error scenarios
+- Don't use real database connections in unit tests
+- Don't create tests that depend on external services
+- Don't write tests that are too tightly coupled to implementation
+
+### Example Test Structure
+
+
+
+## Performance Best Practices
+
+### Database Query Optimization
+
+- **Select Specific Fields**: Only select fields that are needed
+- **Use Indexes**: Ensure proper database indexes for frequently queried fields
+- **Avoid N+1 Queries**: Use Prisma's `include` to fetch related data efficiently
+
+```typescript
+// Good: Fetch related data efficiently in one query
+const flow = await prisma.flow.findUnique({
+    where: { id },
+    include: {
+        steps: { include: { options: true } }
+    }
+});
+
+// Avoid: N+1 queries
+const flow = await prisma.flow.findUnique({ where: { id } });
+const steps = await prisma.flowStep.findMany({ where: { flowId: id } });
+// then loop and query options for each step — N+1
+```
+
+### Async/Await Patterns
+
+- **Always Use Async/Await**: Use async/await instead of promises chains
+- **Error Handling**: Properly handle errors in async operations
+- **Parallel Operations**: Use `Promise.all()` for parallel operations when appropriate
+
+```typescript
+// Good: Parallel operations when results are independent
+const [flows, users] = await Promise.all([
+    flowRepository.findAll(),
+    userRepository.findActiveUsers()
+]);
+```
+
+### Error Handling Performance
+
+- **Early Returns**: Return early to avoid unnecessary processing
+- **Error Propagation**: Let errors propagate naturally through the call stack
+- **Avoid Over-Wrapping**: Don't wrap errors unnecessarily
+
+## Security Best Practices
+
+### Input Validation
+
+- **Validate All Inputs**: Validate all user inputs before processing
+- **Sanitize Data**: Sanitize data to prevent injection attacks
+- **Type Checking**: Use TypeScript and validation to ensure type safety
+
+### Environment Variables
+
+- **Never Commit Secrets**: Never commit `.env` files or secrets to version control
+- **Use Environment Variables**: Use environment variables for configuration
+- **Validate Environment**: Validate required environment variables at startup
+
+```typescript
+// Validate required environment variables
+const requiredEnvVars = ['DATABASE_URL', 'PORT'];
+requiredEnvVars.forEach(varName => {
+    if (!process.env[varName]) {
+        throw new Error(`Missing required environment variable: ${varName}`);
+    }
+});
+```
+
+### Dependency Injection
+
+- **TSyringe**: Use `@injectable()` on classes and `@inject('Token')` on constructor parameters
+- **Register in DI container**: Register all services in `src/infraestructure/DI/`
+- **No `new` in use cases or controllers**: Always receive dependencies injected by the container
+
+```typescript
+// Domain interface
+export interface IConversationRepository {
+    findById(id: string): Promise<Conversation | null>;
+    save(conversation: Conversation): Promise<void>;
+}
+
+// Infrastructure implementation
+import { injectable, inject } from 'tsyringe';
+
+@injectable()
+export class PrismaConversationRepository implements IConversationRepository {
+    constructor(@inject('PrismaClient') private prisma: PrismaClient) {}
+
+    async findById(id: string): Promise<Conversation | null> {
+        const data = await this.prisma.conversation.findUnique({ where: { id } });
+        return data ? new Conversation(data) : null;
+    }
+
+    async save(conversation: Conversation): Promise<void> {
+        await this.prisma.conversation.upsert({
+            where: { id: conversation.id },
+            create: conversation.toPlain(),
+            update: conversation.toPlain()
+        });
+    }
+}
+
+// Use case
+@injectable()
+export class GetConversationUseCase {
+    constructor(
+        @inject('IConversationRepository') private repo: IConversationRepository
+    ) {}
+
+    async execute(id: string): Promise<Conversation> {
+        const conversation = await this.repo.findById(id);
+        if (!conversation) throw ErrorFactory.create('not-found', 'Conversation not found', { id });
+        return conversation;
+    }
+}
+```
+
+## Development Workflow
+
+### Git Workflow
+
+- **Feature Branches**: Develop features in separate branches, adding descriptive suffix "-backend" to allow working in parallel and avoid conflicts or collisions
+- **Descriptive Commits**: Write descriptive commit messages in English
+- **Code Review**: Code review before merging
+- **Small Branches**: Keep branches small and focused
+
+### Development Scripts
+
+```bash
+# Desarrollo
+npm run dev              # Hot-reload (ts-node-dev)
+npm run build            # Compilar TypeScript
+npm run start            # Ejecutar compilado
+
+# Base de Datos
+npm run db:generate      # Generar Prisma Client
+npm run db:push          # Aplicar schema sin migración
+npm run db:seed          # Ejecutar seeders
+npm run db:reset         # Reset completo + seed
+npx prisma migrate dev --name nombre_descriptivo  # Crear migración
+npx prisma studio        # GUI de base de datos
+
+# Calidad de Código
+npm run lint             # ESLint
+npm run lint:fix         # Fix automático ESLint
+npm run format           # Prettier
+
+# Testing
+npm run test             # Ejecutar tests (Vitest)
+npm run coverage         # Cobertura de tests
+```
+
+### Code Quality
+
+- **ESLint Validation**: Run ESLint before commits
+- **TypeScript Compilation**: Ensure TypeScript compiles without errors
+- **All Tests Passing**: Ensure all tests pass before deployment
+- **Code Review**: Review code for adherence to standards
+
+## Deployment
+
+### Express Server (Standard)
+
+The project runs as a standard Express server — **not serverless/Lambda**. Deployments target containers or VMs.
+
+```bash
+# Build & start
+npm run build
+npm run start
+
+# Environment variables required at runtime
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+AWS_REGION=...
+WHATSAPP_TOKEN=...
+```
+
+- Entry point: `src/index.ts` (or `src/server.ts`)
+- The server binds to `process.env.PORT` (default 3000)
+- Health check: `GET /health`
+
+This document serves as the foundation for maintaining code quality and consistency across the DatiHub backend application. All team members should follow these practices to ensure a maintainable, scalable, and testable codebase.

@@ -1,0 +1,2944 @@
+openapi: 3.0.3
+info:
+  title: DatiHub Backend API
+  description: |
+    REST API for the DatiHub conversational chatbot platform.
+
+    Base path: `/api`
+
+    ## ⚠️ DEPRECATED
+    Este archivo está deprecado. La especificación oficial de la API ahora se encuentra en:
+    **`src/shared/swagger/swagger.json`**
+
+    Este archivo se mantiene solo por compatibilidad legacy y será eliminado en futuras versiones.
+  version: 2.0.0
+  deprecated: true
+  contact:
+    name: DatiHub Backend Team
+  license:
+    name: ISC
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://api.tudominio.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+
+  /api/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Logout
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthRegisterResponse"
+
+  /api/auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthProfileResponse"
+
+  /api/flows:
+    get:
+      tags:
+        - Flows
+      summary: List flows
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Flow list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowListResponse"
+    post:
+      tags:
+        - Flows
+      summary: Create flow
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlowRequest"
+      responses:
+        "201":
+          description: Flow created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowResponse"
+
+  /api/flows/{id}:
+    get:
+      tags:
+        - Flows
+      summary: Get flow by id
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Flow details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowResponse"
+    put:
+      tags:
+        - Flows
+      summary: Update flow
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlowRequest"
+      responses:
+        "200":
+          description: Flow updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowResponse"
+    delete:
+      tags:
+        - Flows
+      summary: Delete flow
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Flow deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    patch:
+      tags:
+        - Flows
+      summary: Toggle flow active status
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Flow status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowResponse"
+
+  /api/flows/mass-send/{id}:
+    post:
+      tags:
+        - Flows
+      summary: Mass send flow
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Flow dispatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/users/upload:
+    post:
+      tags:
+        - Users
+      summary: Upload users file
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadUsersRequest"
+      responses:
+        "200":
+          description: Users uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUsersResponse"
+
+  /api/odoo/login:
+    get:
+      tags:
+        - Odoo
+      summary: Odoo login
+      responses:
+        "200":
+          description: Odoo login result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdooLoginResponse"
+
+  /api/odoo/contacts:
+    get:
+      tags:
+        - Odoo
+      summary: List contacts
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdooContactsResponse"
+
+  /api/odoo/contacts/fields:
+    get:
+      tags:
+        - Odoo
+      summary: Contact fields
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contact fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdooFieldsResponse"
+
+  /api/odoo/contacts/tasks:
+    get:
+      tags:
+        - Odoo
+      summary: Task fields
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Task fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdooFieldsResponse"
+
+  /api/odoo/contacts/project/{id}:
+    get:
+      tags:
+        - Odoo
+      summary: Project by user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+                    $ref: "#/components/schemas/OdooProjectResponse"
+    get:
+      tags:
+        - Odoo
+      summary: Contact by id
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    put:
+      tags:
+        - Odoo
+      summary: Update contact
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericObject"
+      responses:
+        "200":
+          description: Contact updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/odoo/users/consent/{id}:
+    put:
+      tags:
+        - Odoo
+      summary: Update user consent
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericObject"
+      responses:
+        "200":
+          description: Consent updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/whatsapp/test:
+    get:
+      tags:
+        - WhatsApp
+      summary: WhatsApp connection test
+      responses:
+        "200":
+          description: WhatsApp connection status
+          content:
+            application/json:
+                schema:
+                  $ref: "#/components/schemas/WhatsAppConnectionResponse"
+
+  /api/whatsapp/webhook:
+    get:
+      tags:
+        - WhatsApp
+      summary: Verify WhatsApp webhook
+      responses:
+        "200":
+          description: Webhook verification
+          content:
+            application/json:
+                schema:
+                  type: string
+    post:
+      tags:
+        - WhatsApp
+      summary: Receive WhatsApp webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericObject"
+      responses:
+        "200":
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/whatsapp/start:
+    post:
+      tags:
+        - WhatsApp
+      summary: Start manual flow
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+                $ref: "#/components/schemas/WhatsAppStartFlowRequest"
+      responses:
+        "200":
+          description: Flow started
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/WhatsAppSimpleSuccessResponse"
+
+  /api/whatsapp/send-message:
+    post:
+      tags:
+        - WhatsApp
+      summary: Send text message
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+                $ref: "#/components/schemas/WhatsAppSendTextRequest"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/WhatsAppSimpleSuccessResponse"
+
+  /api/whatsapp/send-template:
+    post:
+      tags:
+        - WhatsApp
+      summary: Send template message
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+                $ref: "#/components/schemas/WhatsAppSendTemplateRequest"
+      responses:
+        "200":
+          description: Template sent
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/WhatsAppSimpleSuccessResponse"
+
+  /api/whatsapp/templates:
+    get:
+      tags:
+        - WhatsApp
+      summary: List WhatsApp templates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/WhatsAppTemplatesResponse"
+
+  /api/whatsapp/templates/sync:
+    post:
+      tags:
+        - WhatsApp
+      summary: Sync WhatsApp templates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Templates synced
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/WhatsAppSyncTemplatesResponse"
+
+  /api/email/test:
+    post:
+      tags:
+        - Email
+      summary: Send test email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericObject"
+      responses:
+        "200":
+          description: Email sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/adverse-keywords:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: List adverse keywords
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Adverse keywords
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseKeywordListResponse"
+    post:
+      tags:
+        - AdverseKeywords
+      summary: Create adverse keyword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdverseKeywordRequest"
+      responses:
+        "201":
+          description: Adverse keyword created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseKeywordResponse"
+
+  /api/adverse-keywords/{id}:
+    put:
+      tags:
+        - AdverseKeywords
+      summary: Update adverse keyword
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdverseKeywordRequest"
+      responses:
+        "200":
+          description: Adverse keyword updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseKeywordResponse"
+    delete:
+      tags:
+        - AdverseKeywords
+      summary: Delete adverse keyword
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Adverse keyword deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/adverse-keywords/test/system:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse system test
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseSystemCheckResponse"
+
+  /api/adverse-keywords/test/detection:
+    post:
+      tags:
+        - AdverseKeywords
+      summary: Adverse detection test
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdverseDetectionTestRequest"
+      responses:
+        "200":
+          description: Detection test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseDetectionTestResponse"
+
+  /api/adverse-keywords/test/statistics:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse test statistics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseStatisticsResponse"
+
+  /api/adverse-keywords/test/simulate:
+    post:
+      tags:
+        - AdverseKeywords
+      summary: Simulate adverse event
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdverseSimulateEventRequest"
+      responses:
+        "200":
+          description: Simulation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseSimulateEventResponse"
+
+  /api/adverse-keywords/events/overview:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse events overview
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseEventsOverviewResponse"
+
+  /api/adverse-keywords/events/user/{phone}:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse events by user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: phone
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseEventsByUserResponse"
+
+  /api/adverse-keywords/events/keyword/{keyword}:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse events by keyword
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: keyword
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Keyword events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseEventsByKeywordResponse"
+
+  /api/adverse-keywords/events/conversation/{conversationId}:
+    get:
+      tags:
+        - AdverseKeywords
+      summary: Adverse events by conversation
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: conversationId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversation events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseEventsByConversationResponse"
+
+  /api/step-actions:
+    get:
+      tags:
+        - StepActions
+      summary: List step actions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Step actions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepActionListResponse"
+    post:
+      tags:
+        - StepActions
+      summary: Create step action
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StepActionRequest"
+      responses:
+        "201":
+          description: Step action created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepActionResponse"
+
+  /api/step-actions/{id}:
+    get:
+      tags:
+        - StepActions
+      summary: Get step action
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Step action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepActionResponse"
+    put:
+      tags:
+        - StepActions
+      summary: Update step action
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StepActionRequest"
+      responses:
+        "200":
+          description: Step action updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepActionResponse"
+    delete:
+      tags:
+        - StepActions
+      summary: Delete step action
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Step action deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdooContactResponse"
+
+  /api/metrics/dashboard/comprehensive:
+    get:
+      tags:
+        - Metrics
+      summary: Comprehensive dashboard
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/dashboard/summary:
+    get:
+      tags:
+        - Metrics
+      summary: Dashboard summary
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Summary data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/dashboard/flow-performance:
+    get:
+      tags:
+        - Metrics
+      summary: Flow performance metrics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Flow performance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/dashboard/time-analytics:
+    get:
+      tags:
+        - Metrics
+      summary: Time analytics
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            enum: [daily, weekly, monthly]
+      responses:
+        "200":
+          description: Time analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/dashboard/user-analytics:
+    get:
+      tags:
+        - Metrics
+      summary: User analytics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/dashboard/quality-insights:
+    get:
+      tags:
+        - Metrics
+      summary: Quality insights
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Quality insights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/flows/interaction-distribution:
+    get:
+      tags:
+        - Metrics
+      summary: Interaction distribution
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Interaction distribution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/flows/step-count:
+    get:
+      tags:
+        - Metrics
+      summary: Step count per flow
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Step counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/messages/per-conversation:
+    get:
+      tags:
+        - Metrics
+      summary: Messages per conversation
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Messages per conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/messages/fallbacks:
+    get:
+      tags:
+        - Metrics
+      summary: Fallbacks and redirects
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Fallbacks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/metrics/adverse-events:
+    get:
+      tags:
+        - Metrics
+      summary: Adverse events metrics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Adverse events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+
+  /api/webchat/start-session:
+    post:
+      tags:
+        - WebChat
+      summary: Start webchat session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebChatStartSessionRequest"
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebChatStartSessionResponse"
+
+  /api/webchat/session/{sessionId}/email:
+    put:
+      tags:
+        - WebChat
+      summary: Update session email
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebChatUpdateEmailRequest"
+      responses:
+        "200":
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/webchat/message:
+    post:
+      tags:
+        - WebChat
+      summary: Send webchat message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebChatMessageRequest"
+      responses:
+        "200":
+          description: Message processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/webchat/session/{sessionId}:
+    get:
+      tags:
+        - WebChat
+      summary: Get webchat session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebChatSessionResponse"
+
+  /api/webhooks/events:
+    get:
+      tags:
+        - Webhooks
+      summary: List webhook events
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Webhook events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEventListResponse"
+
+  /api/webhooks:
+    get:
+      tags:
+        - Webhooks
+      summary: List webhooks
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: isActive
+          schema:
+            type: boolean
+        - in: query
+          name: event
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookListResponse"
+    post:
+      tags:
+        - Webhooks
+      summary: Create webhook
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRequest"
+      responses:
+        "201":
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResponse"
+
+  /api/webhooks/{id}:
+    get:
+      tags:
+        - Webhooks
+      summary: Get webhook
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhook details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResponse"
+    put:
+      tags:
+        - Webhooks
+      summary: Update webhook
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRequest"
+      responses:
+        "200":
+          description: Webhook updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResponse"
+    delete:
+      tags:
+        - Webhooks
+      summary: Delete webhook
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhook deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/webhooks/{id}/logs:
+    get:
+      tags:
+        - Webhooks
+      summary: Webhook logs
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: success
+          schema:
+            type: boolean
+        - in: query
+          name: event
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Webhook logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookLogListResponse"
+
+  /api/webhooks/{id}/ping:
+    post:
+      tags:
+        - Webhooks
+      summary: Webhook ping
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ping result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookPingResponse"
+
+  /api/webhooks/{id}/test:
+    post:
+      tags:
+        - Webhooks
+      summary: Send test event
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookTestRequest"
+      responses:
+        "200":
+          description: Test sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/notify/test:
+    post:
+      tags:
+        - Notifications
+      summary: Send test notification email
+      responses:
+        "200":
+          description: Email sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotifyTestEmailResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalError"
+
+  /api/test/send-flow:
+    post:
+      tags:
+        - Test
+      summary: Send flow test
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlowTestRequest"
+      responses:
+        "200":
+          description: Flow test sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowTestResponse"
+
+  /api/test/json/add:
+    post:
+      tags:
+        - Test
+      summary: Add JSON test item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonTaskCreateRequest"
+      responses:
+        "200":
+          description: Item added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonTaskCreateResponse"
+
+  /api/test/json/all:
+    get:
+      tags:
+        - Test
+      summary: List JSON test items
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonTaskListResponse"
+
+  /api/test/json/{id}:
+    put:
+      tags:
+        - Test
+      summary: Update JSON test item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonTaskUpdateRequest"
+      responses:
+        "200":
+          description: Item updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonTaskUpdateResponse"
+
+  # ─── Knowledge Base ───────────────────────────────────────
+
+  /api/knowledge-bases:
+    get:
+      tags:
+        - KnowledgeBases
+      summary: List all knowledge bases
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of knowledge bases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    post:
+      tags:
+        - KnowledgeBases
+      summary: Create a knowledge base
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKnowledgeBaseRequest"
+      responses:
+        "201":
+          description: Knowledge base created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/knowledge-bases/{id}:
+    get:
+      tags:
+        - KnowledgeBases
+      summary: Get knowledge base by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Knowledge base detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    put:
+      tags:
+        - KnowledgeBases
+      summary: Update a knowledge base
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKnowledgeBaseRequest"
+      responses:
+        "200":
+          description: Knowledge base updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    delete:
+      tags:
+        - KnowledgeBases
+      summary: Delete a knowledge base
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Knowledge base deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/knowledge-bases/{id}/documents:
+    post:
+      tags:
+        - KnowledgeBases
+      summary: Add a document to a knowledge base
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentRequest"
+      responses:
+        "201":
+          description: Document added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/knowledge-bases/{id}/documents/{documentId}:
+    put:
+      tags:
+        - KnowledgeBases
+      summary: Update a document
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocumentRequest"
+      responses:
+        "200":
+          description: Document updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    delete:
+      tags:
+        - KnowledgeBases
+      summary: Remove a document
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/knowledge-bases/{id}/sync:
+    post:
+      tags:
+        - KnowledgeBases
+      summary: Sync knowledge base from external source
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncKnowledgeBaseRequest"
+      responses:
+        "200":
+          description: Sync result with stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/knowledge-bases/sync/providers:
+    get:
+      tags:
+        - KnowledgeBases
+      summary: List available sync providers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of provider names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        statusCode:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: Operation completed successfully
+        data:
+          $ref: "#/components/schemas/GenericObject"
+      required:
+        - success
+        - statusCode
+        - message
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Validation failed
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+        errorCode:
+          type: string
+          example: validation-failed
+        devMessage:
+          type: string
+          nullable: true
+        filePath:
+          type: string
+          nullable: true
+        isOperational:
+          type: boolean
+          nullable: true
+      required:
+        - success
+        - statusCode
+        - message
+        - errorCode
+    GenericObject:
+      type: object
+      additionalProperties: true
+    PaginationMeta:
+      type: object
+      properties:
+        totalPages:
+          type: integer
+          example: 3
+        currentPage:
+          type: integer
+          example: 1
+        prevPage:
+          type: boolean
+          example: false
+        nextPage:
+          type: boolean
+          example: true
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    RegisterRequest:
+          AuthUser:
+            type: object
+            properties:
+              id:
+                type: string
+              email:
+                type: string
+                format: email
+              name:
+                type: string
+              role:
+                type: string
+          AuthSession:
+            type: object
+            properties:
+              token:
+                type: string
+              expiresAt:
+                type: string
+                format: date-time
+          AuthLoginData:
+            type: object
+            properties:
+              user:
+                $ref: "#/components/schemas/AuthUser"
+              session:
+                $ref: "#/components/schemas/AuthSession"
+          AuthLoginResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AuthLoginData"
+          AuthRegisterResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AuthUser"
+          AuthProfileResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AuthUser"
+          FlowStep:
+            type: object
+            properties:
+              id:
+                type: string
+              stepIndex:
+                type: integer
+              type:
+                type: string
+                enum: [text, input, options, template, ai, file_upload, multiple_choice, number, date, confirmation]
+              content:
+                type: string
+              validationType:
+                type: string
+                nullable: true
+              isRequired:
+                type: boolean
+              options:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GenericObject"
+              imageUrl:
+                type: string
+                format: uri
+                nullable: true
+          Flow:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              description:
+                type: string
+                nullable: true
+              isActive:
+                type: boolean
+              isAutoResponse:
+                type: boolean
+              steps:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlowStep"
+              createdAt:
+                type: string
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+          FlowListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Flow"
+          FlowResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Flow"
+      type: object
+      required: [email, password, name, role]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        name:
+          type: string
+        role:
+          type: string
+    FlowRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+        isAutoResponse:
+          type: boolean
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowStep"
+        agentId:
+          type: string
+          description: "ID del agente Bedrock directo (sin supervisor)"
+        agentAliasId:
+          type: string
+          description: "Alias ID del agente Bedrock directo"
+        supervisorAgentId:
+          type: string
+          maxLength: 255
+          description: "ID del agente Bedrock que actúa como router multi-agente"
+          example: "ABCD1234EF"
+        supervisorAgentAliasId:
+          type: string
+          maxLength: 255
+          description: "Alias ID del agente supervisor Bedrock"
+          example: "TSTALIASID"
+        subAgentsConfig:
+          type: object
+          description: "Mapa de sub-agentes: nombre → { agentId, agentAliasId }"
+          additionalProperties:
+            type: object
+            required: [agentId, agentAliasId]
+            properties:
+              agentId:
+                type: string
+              agentAliasId:
+                type: string
+          example:
+            julie:
+              agentId: "JULIE_AGENT_ID"
+              agentAliasId: "JULIE_ALIAS_ID"
+      required:
+        - name
+        UsersUploadResponse:
+          allOf:
+            - $ref: "#/components/schemas/SuccessResponse"
+            - type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    total:
+                      type: integer
+                    inserted:
+                      type: integer
+                    skipped:
+                      type: integer
+                    errors:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/GenericObject"
+    WebhookRequest:
+          Webhook:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              url:
+                type: string
+                format: uri
+              events:
+                type: array
+                items:
+                  type: string
+              isActive:
+                type: boolean
+              status:
+                type: string
+              retryAttempts:
+                type: integer
+              timeout:
+                type: integer
+              headers:
+                $ref: "#/components/schemas/GenericObject"
+              successCount:
+                type: integer
+              failureCount:
+                type: integer
+              createdAt:
+                type: string
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+          WebhookLog:
+            type: object
+            properties:
+              id:
+                type: string
+              event:
+                type: string
+              payload:
+                $ref: "#/components/schemas/GenericObject"
+              response:
+                $ref: "#/components/schemas/GenericObject"
+              statusCode:
+                type: integer
+              success:
+                type: boolean
+              attempt:
+                type: integer
+              duration:
+                type: integer
+              triggeredAt:
+                type: string
+                format: date-time
+          WebhookEvent:
+            type: object
+            properties:
+              value:
+                type: string
+              description:
+                type: string
+          WebhookResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Webhook"
+          WebhookListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Webhook"
+          WebhookEventListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEvent"
+          WebhookLogListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookLog"
+          WebhookPingResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      success:
+                        type: boolean
+                      latency:
+                        type: integer
+          WebhookTestResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      event:
+                        type: string
+                      delivered:
+                        type: boolean
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+        retryAttempts:
+          type: integer
+        timeout:
+          type: integer
+        headers:
+          $ref: "#/components/schemas/GenericObject"
+    WebhookTestRequest:
+      type: object
+      properties:
+        event:
+          type: string
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    StepActionRequest:
+          StepAction:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              type:
+                type: string
+              config:
+                $ref: "#/components/schemas/GenericObject"
+              isActive:
+                type: boolean
+              createdAt:
+                type: string
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+          StepActionResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/StepAction"
+          StepActionListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/StepAction"
+                      pagination:
+                        $ref: "#/components/schemas/PaginationMeta"
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        config:
+          $ref: "#/components/schemas/GenericObject"
+        isActive:
+          type: boolean
+    AdverseKeywordRequest:
+          AdverseKeyword:
+            type: object
+            properties:
+              id:
+                type: string
+              word:
+                type: string
+              isActive:
+                type: boolean
+              createdAt:
+                type: string
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+          AdverseKeywordResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AdverseKeyword"
+          AdverseKeywordListResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdverseKeyword"
+                      pagination:
+                        $ref: "#/components/schemas/PaginationMeta"
+      type: object
+      properties:
+        word:
+          type: string
+        isActive:
+          type: boolean
+    WebChatStartSessionRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/GenericObject"
+    WebChatMessageRequest:
+          WebChatSession:
+            type: object
+            properties:
+              sessionId:
+                type: string
+              conversationId:
+                type: string
+                nullable: true
+              chatbotUserId:
+                type: string
+                nullable: true
+              isAnonymous:
+                type: boolean
+              status:
+                type: string
+                enum: [in_progress, completed, abandoned]
+              mode:
+                type: string
+                enum: [FLOW, AI, HUMAN]
+              startedAt:
+                type: string
+                format: date-time
+              completedAt:
+                type: string
+                format: date-time
+                nullable: true
+              visitorMetadata:
+                $ref: "#/components/schemas/GenericObject"
+          WebChatSessionResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/WebChatSession"
+          WebChatMessageResponse:
+            allOf:
+              - $ref: "#/components/schemas/SuccessResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GenericObject"
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+        email:
+          type: string
+          format: email
+        content:
+          type: string
+        mediaUrl:
+          type: string
+          format: uri
+        interactiveResponse:
+          $ref: "#/components/schemas/GenericObject"
+    UploadUsersRequest:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: string
+          description: Google Sheets file ID
+          example: "1pF8oT5x0yZ7cWvA2B3C4d5E6F7G8h9I"
+
+    UploadUsersResponse:
+      type: object
+      properties:
+        failedOdooIds:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+          nullable: true
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        status:
+          type: string
+        retryAttempts:
+          type: number
+        timeout:
+          type: number
+        headers:
+          $ref: "#/components/schemas/GenericObject"
+        successCount:
+          type: number
+        failureCount:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WebhookLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        event:
+          type: string
+        payload:
+          $ref: "#/components/schemas/GenericObject"
+        response:
+          $ref: "#/components/schemas/GenericObject"
+        statusCode:
+          type: number
+        success:
+          type: boolean
+        attempt:
+          type: number
+        duration:
+          type: number
+        triggeredAt:
+          type: string
+          format: date-time
+    WebhookCreateRequest:
+      type: object
+      required: [name, url, events]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+        retryAttempts:
+          type: number
+        timeout:
+          type: number
+        headers:
+          $ref: "#/components/schemas/GenericObject"
+    WebhookUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+        retryAttempts:
+          type: number
+        timeout:
+          type: number
+        headers:
+          $ref: "#/components/schemas/GenericObject"
+        isActive:
+          type: boolean
+    WebhookListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Webhook"
+    WebhookDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            webhook:
+              $ref: "#/components/schemas/Webhook"
+            recentLogs:
+              type: array
+              items:
+                $ref: "#/components/schemas/WebhookLog"
+    WebhookLogsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookLog"
+        count:
+          type: number
+    WebhookEventsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              description:
+                type: string
+    WebhookPingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            success:
+              type: boolean
+            latency:
+              type: number
+    WebhookTestRequest:
+      type: object
+      required: [event]
+      properties:
+        event:
+          type: string
+        data:
+          $ref: "#/components/schemas/GenericObject"
+
+    WebChatStartSessionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        statusCode:
+          type: number
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            sessionId:
+              type: string
+            chatbotUserId:
+              type: string
+              nullable: true
+            isAnonymous:
+              type: boolean
+    WebChatUpdateEmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+
+    WhatsAppStartFlowRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+        message:
+          type: string
+    WhatsAppSendTextRequest:
+      type: object
+      required: [phone, text]
+      properties:
+        phone:
+          type: string
+        text:
+          type: string
+    WhatsAppSendTemplateRequest:
+      type: object
+      required: [phone, templateName]
+      properties:
+        phone:
+          type: string
+        templateName:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+    WhatsAppTemplatesResponse:
+      type: object
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+    WhatsAppSyncTemplatesResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        count:
+          type: number
+    WhatsAppConnectionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    WhatsAppSimpleSuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          nullable: true
+
+    MetricsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+
+    OdooLoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        uid:
+          type: number
+    OdooContactsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        contacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+    OdooContactResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        contact:
+          $ref: "#/components/schemas/GenericObject"
+    OdooFieldsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        fields:
+          $ref: "#/components/schemas/GenericObject"
+    OdooProjectResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        projectId:
+          type: number
+    OdooUpdateContactRequest:
+      type: object
+      additionalProperties: true
+    OdooUpdateContactResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          $ref: "#/components/schemas/GenericObject"
+    OdooUserConsentRequest:
+      type: object
+      required: [phone, consent]
+      properties:
+        phone:
+          type: string
+        consent:
+          type: boolean
+        odooId:
+          type: number
+          nullable: true
+    OdooUserConsentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          $ref: "#/components/schemas/GenericObject"
+
+    NotifyTestEmailResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+
+    FlowTestRequest:
+      type: object
+      required: [flowId, phoneNumbers]
+      properties:
+        flowId:
+          type: string
+          format: uuid
+        phoneNumbers:
+          type: array
+          items:
+            type: string
+        allowRepeat:
+          type: boolean
+    FlowTestResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        result:
+          $ref: "#/components/schemas/GenericObject"
+    JsonTaskCreateRequest:
+      type: object
+      required: [name, schedule]
+      properties:
+        name:
+          type: string
+        schedule:
+          type: string
+        isActive:
+          type: boolean
+    JsonTaskCreateResponse:
+      type: object
+      properties:
+        data:
+          type: string
+    JsonTaskListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+        count:
+          type: number
+    JsonTaskUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        schedule:
+          type: string
+        isActive:
+          type: boolean
+    JsonTaskUpdateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+        message:
+          type: string
+
+    AdverseSystemCheckResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseDetectionTestRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            type: string
+    AdverseDetectionTestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericObject"
+    AdverseStatisticsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseSimulateEventRequest:
+      type: object
+      required: [phone, message]
+      properties:
+        phone:
+          type: string
+        message:
+          type: string
+        flowId:
+          type: string
+          format: uuid
+        stepId:
+          type: string
+          format: uuid
+        dryRun:
+          type: boolean
+    AdverseSimulateEventResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseEventsOverviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseEventsByUserResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseEventsByKeywordResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+    AdverseEventsByConversationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GenericObject"
+
+    # ─── Knowledge Base Schemas ─────────────────────────────
+
+    CreateKnowledgeBaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        description:
+          type: string
+        documentType:
+          type: string
+        source:
+          type: string
+        language:
+          type: string
+        syncTarget:
+          type: string
+          enum: [postgres, s3-bedrock]
+          default: postgres
+        syncTargetConfig:
+          type: object
+          properties:
+            bucket:
+              type: string
+            region:
+              type: string
+            prefix:
+              type: string
+            bedrockKbId:
+              type: string
+            bedrockDataSourceId:
+              type: string
+
+    UpdateKnowledgeBaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        description:
+          type: string
+        documentType:
+          type: string
+        source:
+          type: string
+        language:
+          type: string
+        isActive:
+          type: boolean
+        syncTarget:
+          type: string
+          enum: [postgres, s3-bedrock]
+        syncTargetConfig:
+          type: object
+          properties:
+            bucket:
+              type: string
+            region:
+              type: string
+            prefix:
+              type: string
+            bedrockKbId:
+              type: string
+            bedrockDataSourceId:
+              type: string
+
+    CreateDocumentRequest:
+      type: object
+      required: [fileName, content]
+      properties:
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+        mimeType:
+          type: string
+          default: text/plain
+
+    UpdateDocumentRequest:
+      type: object
+      properties:
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+        mimeType:
+          type: string
+
+    SyncKnowledgeBaseRequest:
+      type: object
+      required: [sourceType, sourceConfig]
+      properties:
+        sourceType:
+          type: string
+          minLength: 1
+          maxLength: 50
+        sourceConfig:
+          type: object
+          additionalProperties: true
+        dryRun:
+          type: boolean
+          default: false
+        forceFullSync:
+          type: boolean
+          default: false
+        batchSize:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+
+tags:
+  - name: Health
+    description: Health endpoints
+  - name: Auth
+    description: Authentication and session
+  - name: Flows
+    description: Flow management
+  - name: Users
+    description: User operations
+  - name: Odoo
+    description: Odoo integration
+  - name: WhatsApp
+    description: WhatsApp channel
+  - name: Email
+    description: Email notifications
+  - name: Notifications
+    description: Notification testing
+  - name: AdverseKeywords
+    description: Adverse keyword management
+  - name: StepActions
+    description: Step action management
+  - name: Metrics
+    description: Metrics and dashboards
+  - name: WebChat
+    description: Web chat integration
+  - name: Webhooks
+    description: Webhook management
+  - name: KnowledgeBases
+    description: Knowledge base management and sync
+  - name: Test
+    description: Test endpoints

@@ -1,0 +1,45 @@
+name: Dependabot lockfile sync
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  sync-lockfile:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Regenerate lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Commit updated lockfile (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet pnpm-lock.yaml; then
+            echo "Lockfile already in sync, nothing to commit."
+          else
+            git add pnpm-lock.yaml
+            git commit -m "chore(deps): sync pnpm-lock.yaml with dependabot update [skip ci]"
+            git push
+          fi
