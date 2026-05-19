@@ -39,6 +39,19 @@ model Product {
   @@map("products")
 }
 
+model QueryLog {
+  id          Int      @id @default(autoincrement())
+  endpoint    String   @db.VarChar(50)
+  input       Json
+  resultCount Int?     @map("result_count")
+  durationMs  Int?     @map("duration_ms")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([endpoint])
+  @@index([createdAt])
+  @@map("query_logs")
+}
+
 model StorePolicy {
   id        Int      @id @default(autoincrement())
   clientId  String   @map("client_id") @db.VarChar(50)

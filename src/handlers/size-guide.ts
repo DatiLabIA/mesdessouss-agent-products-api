@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
+import { logQuery } from "../lib/audit";
 import type { SizeGuideInput } from "../types";
 
 const CLIENT_ID = "mesdessous";
@@ -15,6 +16,7 @@ function normalizeBrand(brand: string): string {
 }
 
 export async function sizeGuide(req: Request, res: Response): Promise<void> {
+  const start = Date.now();
   try {
     const { product_type, brand } = req.body as SizeGuideInput;
 
@@ -34,6 +36,7 @@ export async function sizeGuide(req: Request, res: Response): Promise<void> {
       });
 
       if (policy) {
+        logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 1, durationMs: Date.now() - start });
         res.json({ topic: policy.topic, brand, product_type: product_type ?? null, content: policy.content });
         return;
       }
@@ -45,6 +48,7 @@ export async function sizeGuide(req: Request, res: Response): Promise<void> {
     });
 
     if (fallback) {
+      logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 1, durationMs: Date.now() - start });
       res.json({
         topic: fallback.topic,
         brand: brand ?? null,
@@ -55,6 +59,7 @@ export async function sizeGuide(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 0, durationMs: Date.now() - start });
     res.json({
       topic: null,
       brand: brand ?? null,

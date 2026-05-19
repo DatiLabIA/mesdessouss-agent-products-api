@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { logQuery } from "../lib/audit";
 import type { ProductSearchInput, ProductSearchResponse, ProductResult } from "../types";
 
 function escapeRegex(str: string): string {
@@ -34,6 +35,7 @@ interface ProductRow {
 }
 
 export async function productSearch(req: Request, res: Response): Promise<void> {
+  const start = Date.now();
   try {
     const input = req.body as ProductSearchInput;
 
@@ -120,6 +122,7 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
       response.suggestion = `No se encontraron ${input.type}${input.size ? ` en talla ${input.size}` : ""}. Intenta con otros filtros.`;
     }
 
+    logQuery({ endpoint: "product_search", input: input as Record<string, unknown>, resultCount: products.length, durationMs: Date.now() - start });
     res.json(response);
   } catch (err) {
     console.error("[product_search] Error:", err);
