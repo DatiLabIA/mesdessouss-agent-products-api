@@ -33,5 +33,15 @@
     "@types/pg": "^8.20.0",
     "tsx": "^4.22.2",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "proper-lockfile>signal-exit": "^3.0.7"
+    },
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
   }
 }
