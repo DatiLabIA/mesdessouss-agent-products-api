@@ -1,11 +1,12 @@
 export interface ProductSearchInput {
-  type: string;
-  size?: string;
+  type: string | string[];
+  size?: string | string[];
   gender?: "female" | "male";
-  brand?: string;
-  color?: string;
+  brand?: string | string[];
+  color?: string | string[];
   max_price?: number;
-  sub_type?: string;
+  min_price?: number;
+  sub_type?: string | string[];
 }
 
 export interface SizeGuideInput {

@@ -4,16 +4,26 @@ import { prisma } from "../lib/prisma";
 import { logQuery } from "../lib/audit";
 import type { ProductSearchInput, ProductSearchResponse, ProductResult } from "../types";
 
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Normaliza string | string[] → string[] siempre */
+function toArray(val: string | string[] | undefined): string[] {
+  if (!val) return [];
+  return Array.isArray(val) ? val.filter(Boolean) : [val];
 }
 
 function splitValues(raw: string | null): string[] {
   if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/** Construye el patrón regex para una talla: "95C" o "95 C" → matchea "95 C (eu 80)" */
+function buildSizePattern(size: string): string | null {
+  const normalized = size.trim().replace(/\s+/g, "").toUpperCase();
+  const parts = normalized.match(/^(\d+)([A-Z]+)$/);
+  if (parts) {
+    const [, num, letter] = parts;
+    return `(^|,)\\s*${num}\\s*${letter}(\\s*\\([^)]*\\))?(,|$)`;
+  }
+  return null;
 }
 
 interface ProductRow {
@@ -39,7 +49,8 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
   try {
     const input = req.body as ProductSearchInput;
 
-    if (!input.type) {
+    const types = toArray(input.type);
+    if (types.length === 0) {
       res.status(400).json({ error: "El campo 'type' es obligatorio", products: [], total: 0 });
       return;
     }
@@ -51,48 +62,61 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
       Prisma.sql`(image_url LIKE '%.jpg' OR image_url LIKE '%.png' OR image_url LIKE '%.webp')`,
     ];
 
-    conditions.push(
-      Prisma.sql`(LOWER(type) LIKE ${`%${input.type.toLowerCase()}%`} OR LOWER(sub_type) LIKE ${`%${input.type.toLowerCase()}%`})`
+    // type: OR entre todos los valores
+    const typeClauses = types.map(
+      (t) => Prisma.sql`(LOWER(type) LIKE ${`%${t.toLowerCase()}%`} OR LOWER(sub_type) LIKE ${`%${t.toLowerCase()}%`})`
     );
+    conditions.push(Prisma.sql`(${Prisma.join(typeClauses, " OR ")})`);
 
-    if (input.size) {
-      // Normalize: "95C" or "95 C" → number + optional space + letter
-      // DB format: "95 C (eu 80), 90 B (eu 75), ..."
-      const normalized = input.size.trim().replace(/\s+/g, "").toUpperCase();
-      const parts = normalized.match(/^(\d+)([A-Z]+)$/);
-      if (parts) {
-        const [, num, letter] = parts;
-        // Matches: start-or-comma, optional spaces, number, optional space, letter, optional (eu XX) suffix, then comma or end
-        const sizePattern = `(^|,)\\s*${num}\\s*${letter}(\\s*\\([^)]*\\))?(,|$)`;
-        conditions.push(Prisma.sql`sizes ~* ${sizePattern}`);
-      } else {
-        // Fallback for non-standard formats
-        conditions.push(Prisma.sql`LOWER(sizes) LIKE ${`%${input.size.toLowerCase()}%`}`);
-      }
+    // size: OR entre todas las tallas
+    const sizes = toArray(input.size);
+    if (sizes.length > 0) {
+      const sizeClauses = sizes.map((s) => {
+        const pattern = buildSizePattern(s);
+        return pattern
+          ? Prisma.sql`sizes ~* ${pattern}`
+          : Prisma.sql`LOWER(sizes) LIKE ${`%${s.toLowerCase()}%`}`;
+      });
+      conditions.push(Prisma.sql`(${Prisma.join(sizeClauses, " OR ")})`);
+    }
+
+    // brand: OR entre todas las marcas
+    const brands = toArray(input.brand);
+    if (brands.length > 0) {
+      const brandClauses = brands.map(
+        (b) => Prisma.sql`LOWER(brand) LIKE ${`%${b.toLowerCase()}%`}`
+      );
+      conditions.push(Prisma.sql`(${Prisma.join(brandClauses, " OR ")})`);
+    }
+
+    // color: OR entre todos los colores
+    const colors = toArray(input.color);
+    if (colors.length > 0) {
+      const colorClauses = colors.map(
+        (c) => Prisma.sql`LOWER(color) LIKE ${`%${c.toLowerCase()}%`}`
+      );
+      conditions.push(Prisma.sql`(${Prisma.join(colorClauses, " OR ")})`);
+    }
+
+    // sub_type: OR entre todos los subtipos
+    const subTypes = toArray(input.sub_type);
+    if (subTypes.length > 0) {
+      const subClauses = subTypes.map(
+        (s) => Prisma.sql`(LOWER(sub_type) LIKE ${`%${s.toLowerCase()}%`} OR LOWER(name) LIKE ${`%${s.toLowerCase()}%`})`
+      );
+      conditions.push(Prisma.sql`(${Prisma.join(subClauses, " OR ")})`);
     }
 
     if (input.gender) {
-      conditions.push(
-        Prisma.sql`(gender = ${input.gender} OR gender IS NULL OR gender = '')`
-      );
+      conditions.push(Prisma.sql`(gender = ${input.gender} OR gender IS NULL OR gender = '')`);
     }
 
-    if (input.brand) {
-      conditions.push(Prisma.sql`LOWER(brand) LIKE ${`%${input.brand.toLowerCase()}%`}`);
-    }
-
-    if (input.color) {
-      conditions.push(Prisma.sql`LOWER(color) LIKE ${`%${input.color.toLowerCase()}%`}`);
+    if (input.min_price !== undefined) {
+      conditions.push(Prisma.sql`price >= ${input.min_price}`);
     }
 
     if (input.max_price !== undefined) {
       conditions.push(Prisma.sql`price <= ${input.max_price}`);
-    }
-
-    if (input.sub_type) {
-      conditions.push(
-        Prisma.sql`(LOWER(sub_type) LIKE ${`%${input.sub_type.toLowerCase()}%`} OR LOWER(name) LIKE ${`%${input.sub_type.toLowerCase()}%`})`
-      );
     }
 
     const whereClause = Prisma.join(conditions, " AND ");
@@ -130,7 +154,9 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
     };
 
     if (products.length === 0) {
-      response.suggestion = `No se encontraron ${input.type}${input.size ? ` en talla ${input.size}` : ""}. Intenta con otros filtros.`;
+      const typeLabel = types.join(" / ");
+      const sizeLabel = sizes.length > 0 ? ` en talla ${sizes.join(" o ")}` : "";
+      response.suggestion = `No se encontraron ${typeLabel}${sizeLabel}. Intenta con otros filtros.`;
     }
 
     logQuery({ endpoint: "product_search", input: input as unknown as import("@prisma/client").Prisma.InputJsonObject, resultCount: products.length, durationMs: Date.now() - start });
