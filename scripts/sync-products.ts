@@ -16,6 +16,7 @@ import * as https from "https";
 import * as http from "http";
 import * as path from "path";
 import { prisma } from "../src/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 const CLIENT_ID = "mesdessous";
 const SOURCE_URL = process.env.BEDROCK_KB_SOURCE_URL ?? "";
@@ -248,54 +249,105 @@ async function main(): Promise<void> {
 
   console.log("Sincronizando con la base de datos...");
   const activeRefs = new Set<string>();
-  let upserted = 0;
-  let errors = 0;
+  const rows: {
+    clientId: string; productId: string; name: string;
+    brand: string | null; type: string | null; subType: string | null;
+    gender: string | null; price: number | null; oldPrice: number | null;
+    hasDiscount: boolean; discountPct: number;
+    color: string | null; sizes: string | null; materials: string | null;
+    styles: string | null; collection: string | null;
+    imageUrl: string | null; productUrl: string | null; description: string | null;
+  }[] = [];
 
   for (const p of products) {
-    const productId = p.reference;
-    if (!productId) { errors++; continue; }
-    activeRefs.add(productId);
-
-    try {
-      const name = extractCleanName(p.name);
-      const description = cleanDescription(p.description);
-      const price = parseFloat(p.price) || null;
-      const oldPrice = parseFloat(p.old_price) || null;
-      const { hasDiscount, discountPct } = calculateDiscount(price ?? 0, oldPrice ?? 0);
-      const sizes = p.allSizes.join(", ") || null;
-      const color = p.allColors.join(", ") || p.color || null;
-      const styles = extractStyles(p.name, p.description) || null;
-
-      await prisma.product.upsert({
-        where: { clientId_productId: { clientId: CLIENT_ID, productId } },
-        create: {
-          clientId: CLIENT_ID, productId, name,
-          brand: p.brand || null, type: p.type || null, subType: p.forme || null,
-          gender: p.gender || null,
-          price: price ?? undefined, oldPrice: oldPrice ?? undefined,
-          hasDiscount, discountPct,
-          color, sizes, materials: p.material || null, styles,
-          collection: p.gamme || null, imageUrl: p.image1 || null,
-          productUrl: p.product_url || null, description,
-          active: true, syncedAt: new Date(),
-        },
-        update: {
-          name, brand: p.brand || null, type: p.type || null, subType: p.forme || null,
-          gender: p.gender || null,
-          price: price ?? undefined, oldPrice: oldPrice ?? undefined,
-          hasDiscount, discountPct,
-          color, sizes, materials: p.material || null, styles,
-          collection: p.gamme || null, imageUrl: p.image1 || null,
-          productUrl: p.product_url || null, description,
-          active: true, syncedAt: new Date(),
-        },
-      });
-      upserted++;
-    } catch (err) {
-      console.error(`Error en ref ${productId}:`, (err as Error).message);
-      errors++;
-    }
+    if (!p.reference) continue;
+    activeRefs.add(p.reference);
+    const name = extractCleanName(p.name);
+    const description = cleanDescription(p.description);
+    const price = parseFloat(p.price) || null;
+    const oldPrice = parseFloat(p.old_price) || null;
+    const { hasDiscount, discountPct } = calculateDiscount(price ?? 0, oldPrice ?? 0);
+    rows.push({
+      clientId: CLIENT_ID,
+      productId: p.reference,
+      name,
+      brand: p.brand || null,
+      type: p.type || null,
+      subType: p.forme || null,
+      gender: p.gender || null,
+      price,
+      oldPrice,
+      hasDiscount,
+      discountPct,
+      color: p.allColors.join(", ") || p.color || null,
+      sizes: p.allSizes.join(", ") || null,
+      materials: p.material || null,
+      styles: extractStyles(p.name, p.description) || null,
+      collection: p.gamme || null,
+      imageUrl: p.image1 || null,
+      productUrl: p.product_url || null,
+      description,
+    });
   }
+
+  const BATCH_SIZE = 1000;
+  const CONCURRENCY = 4;
+  let upserted = 0;
+  const now = new Date();
+
+  const batches: typeof rows[] = [];
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    batches.push(rows.slice(i, i + BATCH_SIZE));
+  }
+
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const chunk = batches.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map(async (batch) => {
+      const values = batch.map((r) =>
+        Prisma.sql`(${r.clientId}, ${r.productId}, ${r.name},
+          ${r.brand}, ${r.type}, ${r.subType}, ${r.gender},
+          ${r.price}, ${r.oldPrice}, ${r.hasDiscount}, ${r.discountPct},
+          ${r.color}, ${r.sizes}, ${r.materials}, ${r.styles},
+          ${r.collection}, ${r.imageUrl}, ${r.productUrl}, ${r.description},
+          true, ${now})`
+      );
+      await prisma.$executeRaw`
+        INSERT INTO products (
+          client_id, product_id, name,
+          brand, type, sub_type, gender,
+          price, old_price, has_discount, discount_pct,
+          color, sizes, materials, styles,
+          collection, image_url, product_url, description,
+          active, synced_at
+        )
+        VALUES ${Prisma.join(values)}
+        ON CONFLICT (client_id, product_id)
+        DO UPDATE SET
+          name        = EXCLUDED.name,
+          brand       = EXCLUDED.brand,
+          type        = EXCLUDED.type,
+          sub_type    = EXCLUDED.sub_type,
+          gender      = EXCLUDED.gender,
+          price       = EXCLUDED.price,
+          old_price   = EXCLUDED.old_price,
+          has_discount = EXCLUDED.has_discount,
+          discount_pct = EXCLUDED.discount_pct,
+          color       = EXCLUDED.color,
+          sizes       = EXCLUDED.sizes,
+          materials   = EXCLUDED.materials,
+          styles      = EXCLUDED.styles,
+          collection  = EXCLUDED.collection,
+          image_url   = EXCLUDED.image_url,
+          product_url = EXCLUDED.product_url,
+          description = EXCLUDED.description,
+          active      = true,
+          synced_at   = EXCLUDED.synced_at
+      `;
+      upserted += batch.length;
+      process.stdout.write(`\r   ${upserted}/${rows.length} productos sincronizados...`);
+    }));
+  }
+  console.log();
 
   const deactivated = await prisma.product.updateMany({
     where: { clientId: CLIENT_ID, active: true, NOT: { productId: { in: [...activeRefs] } } },
@@ -306,10 +358,7 @@ async function main(): Promise<void> {
   console.log("\nSincronizacion completada:");
   console.log(`  Actualizados/creados : ${upserted}`);
   console.log(`  Desactivados         : ${deactivated.count}`);
-  console.log(`  Errores              : ${errors}`);
   console.log(`  Tiempo               : ${elapsed}s`);
-
-  if (errors > 0) process.exitCode = 1;
 }
 
 main()
