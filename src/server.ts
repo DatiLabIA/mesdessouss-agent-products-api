@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
+import cron from "node-cron";
 import { mesdessousRouter } from "./routes/mesdessous.routes";
+import { syncProducts } from "./lib/sync-products";
 
 const app = express();
 
@@ -43,4 +45,17 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.listen(PORT, () => {
   console.log(`[server] Catalog Service running on port ${PORT}`);
+
+  // Sincronización automática cada 6 horas (solo en producción)
+  if (process.env.NODE_ENV === "production") {
+    // Ejecutar una vez al arrancar para tener el catálogo fresco
+    syncProducts().catch((err) => console.error("[sync] Error en sync inicial:", err));
+
+    // Cada 6 horas: 0 0,6,12,18 * * *
+    cron.schedule("0 0,6,12,18 * * *", () => {
+      console.log("[sync] Iniciando sync programado...");
+      syncProducts().catch((err) => console.error("[sync] Error en sync programado:", err));
+    });
+    console.log("[sync] Scheduler activo — cada 6 horas");
+  }
 });
