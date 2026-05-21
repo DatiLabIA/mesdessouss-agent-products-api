@@ -120,6 +120,11 @@ function groupProductsByReference(products: ParsedProduct[]): ConsolidatedProduc
   return consolidated;
 }
 
+function normalizeUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace(/(https?:\/\/[^\/]+)\/[a-z]{2}\//i, "$1/");
+}
+
 function extractCleanName(rawName: string): string {
   return rawName ? rawName.split(",")[0].trim() : "";
 }
@@ -220,7 +225,7 @@ export async function syncProducts(): Promise<void> {
       materials: p.material || null,
       styles: extractStyles(p.name, p.description) || null,
       collection: p.gamme || null, imageUrl: p.image1 || null,
-      productUrl: p.product_url || null,
+      productUrl: normalizeUrl(p.product_url) || null,
       description: cleanDescription(p.description),
     });
   }
