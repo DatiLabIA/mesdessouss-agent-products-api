@@ -18,7 +18,8 @@ function splitValues(raw: string | null): string[] {
 /** Construye el patrón regex para una talla: "95C" o "95 C" → matchea "95 C (eu 80)" */
 function buildSizePattern(size: string): string | null {
   const normalized = size.trim().replace(/\s+/g, "").toUpperCase();
-  const parts = normalized.match(/^(\d+)([A-Z]+)$/);
+  // Solo aplica regex de copa para tallas de sujetador: número + 1 letra A-J (ej. 95C, 85B)
+  const parts = normalized.match(/^(\d+)([A-J])$/);
   if (parts) {
     const [, num, letter] = parts;
     return `(^|,)\\s*${num}\\s*${letter}(\\s*\\([^)]*\\))?(,|$)`;
