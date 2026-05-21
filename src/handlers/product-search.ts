@@ -108,7 +108,7 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
     }
 
     if (input.gender) {
-      conditions.push(Prisma.sql`(gender = ${input.gender} OR gender IS NULL OR gender = '')`);
+      conditions.push(Prisma.sql`gender = ${input.gender}`);
     }
 
     if (input.min_price !== undefined) {
