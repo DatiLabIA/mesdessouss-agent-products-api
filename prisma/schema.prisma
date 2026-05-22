@@ -7,30 +7,33 @@ datasource db {
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  clientId    String   @map("client_id") @db.VarChar(50)
-  productId   String   @map("product_id") @db.VarChar(50)
-  name        String   @db.Text
-  brand       String?  @db.VarChar(100)
-  type        String?  @db.VarChar(100)
-  subType     String?  @map("sub_type") @db.VarChar(200)
-  gender      String?  @default("female") @db.VarChar(20)
-  price       Decimal? @db.Decimal(10, 2)
-  oldPrice    Decimal? @map("old_price") @db.Decimal(10, 2)
-  hasDiscount Boolean  @default(false) @map("has_discount")
-  discountPct Int      @default(0) @map("discount_pct")
-  color       String?  @db.Text
-  sizes       String?  @db.Text
-  materials   String?  @db.Text
-  styles      String?  @db.Text
-  collection  String?  @db.VarChar(200)
-  productUrl  String?  @map("product_url") @db.Text
-  imageUrl    String?  @map("image_url") @db.Text
-  description String?  @db.Text
-  active      Boolean  @default(true)
-  syncedAt    DateTime @default(now()) @map("synced_at")
+  id              Int      @id @default(autoincrement())
+  clientId        String   @map("client_id") @db.VarChar(50)
+  productId       String   @map("product_id") @db.VarChar(100)
+  baseProductId   String   @map("base_product_id") @db.VarChar(50)
+  name            String   @db.Text
+  brand           String?  @db.VarChar(100)
+  type            String?  @db.VarChar(100)
+  subType         String?  @map("sub_type") @db.VarChar(200)
+  gender          String?  @default("female") @db.VarChar(20)
+  price           Decimal? @db.Decimal(10, 2)
+  oldPrice        Decimal? @map("old_price") @db.Decimal(10, 2)
+  hasDiscount     Boolean  @default(false) @map("has_discount")
+  discountPct     Int      @default(0) @map("discount_pct")
+  color           String?  @db.Text
+  sizes           String?  @db.Text
+  materials       String?  @db.Text
+  styles          String?  @db.Text
+  collection      String?  @db.VarChar(200)
+  productUrl      String?  @map("product_url") @db.Text
+  imageUrl        String?  @map("image_url") @db.Text
+  description     String?  @db.Text
+  quantity        Int?     @default(0)
+  active          Boolean  @default(true)
+  syncedAt        DateTime @default(now()) @map("synced_at")
 
   @@unique([clientId, productId])
+  @@index([clientId, baseProductId])
   @@index([clientId, type])
   @@index([clientId, brand])
   @@index([clientId, gender])

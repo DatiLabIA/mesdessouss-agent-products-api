@@ -30,6 +30,7 @@ function buildSizePattern(size: string): string | null {
 interface ProductRow {
   id: number;
   product_id: string;
+  base_product_id: string;
   name: string;
   brand: string | null;
   type: string | null;
@@ -40,9 +41,11 @@ interface ProductRow {
   discount_pct: number;
   color: string | null;
   sizes: string | null;
+  materials: string | null;
   product_url: string | null;
   image_url: string | null;
   description: string | null;
+  quantity: number | null;
 }
 
 export async function productSearch(req: Request, res: Response): Promise<void> {
@@ -108,6 +111,15 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
       conditions.push(Prisma.sql`(${Prisma.join(subClauses, " OR ")})`);
     }
 
+    // material: OR entre todos los materiales
+    const materials = toArray(input.material);
+    if (materials.length > 0) {
+      const matClauses = materials.map(
+        (m) => Prisma.sql`LOWER(materials) LIKE ${`%${m.toLowerCase()}%`}`
+      );
+      conditions.push(Prisma.sql`(${Prisma.join(matClauses, " OR ")})`);
+    }
+
     if (input.gender) {
       conditions.push(Prisma.sql`gender = ${input.gender}`);
     }
@@ -122,17 +134,28 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
 
     const whereClause = Prisma.join(conditions, " AND ");
 
-    const rows = await prisma.$queryRaw<ProductRow[]>`
-      SELECT id, product_id, name, brand, type, sub_type, price, old_price,
-             has_discount, discount_pct, color, sizes, product_url, image_url, description
-      FROM products
-      WHERE ${whereClause}
-      ORDER BY has_discount DESC, price ASC
-      LIMIT 10
-    `;
+    // Con talla: filas exactas por variación. Sin talla: deduplicar por base_product_id
+    const rows = sizes.length > 0
+      ? await prisma.$queryRaw<ProductRow[]>`
+          SELECT id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                 has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
+          FROM products
+          WHERE ${whereClause}
+          ORDER BY has_discount DESC, price ASC
+          LIMIT 15
+        `
+      : await prisma.$queryRaw<ProductRow[]>`
+          SELECT DISTINCT ON (base_product_id) id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                 has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
+          FROM products
+          WHERE ${whereClause}
+          ORDER BY base_product_id, has_discount DESC, price ASC
+          LIMIT 10
+        `;
 
     const products: ProductResult[] = rows.map((row) => ({
       id: row.product_id,
+      base_product_id: row.base_product_id,
       name: row.name,
       brand: row.brand,
       type: row.type,
@@ -141,8 +164,11 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
       old_price: row.old_price !== null ? parseFloat(row.old_price) : null,
       has_discount: row.has_discount,
       discount_percentage: row.discount_pct,
-      sizes_available: splitValues(row.sizes),
-      colors_available: splitValues(row.color),
+      size: row.sizes ?? null,
+      color: row.color ?? null,
+      material: row.materials ?? null,
+      quantity: row.quantity ?? 0,
+      in_stock: (row.quantity ?? 0) > 0,
       url: row.product_url,
       image_url: row.image_url,
       description: row.description,

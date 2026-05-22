@@ -19,13 +19,19 @@ interface ParsedProduct {
   size: string; image1: string; linkvariation: string; gamme: string;
   material: string; type: string; forme: string; price: string;
   old_price: string; reference: string; link: string; gender: string;
+  quantity: string;
   extraFields?: Record<string, string>;
 }
 
-interface ConsolidatedProduct extends ParsedProduct {
+interface FlatProduct {
+  baseRef: string;
+  reference: string;
+  name: string; brand: string; description: string;
+  color: string; size: string;
+  image1: string; gamme: string; material: string;
+  type: string; forme: string; price: string; old_price: string;
+  link: string; gender: string; quantity: string;
   product_url: string;
-  allSizes: string[];
-  allColors: string[];
 }
 
 // --- Helpers XML ---
@@ -49,7 +55,7 @@ function extractCDATA(xmlBlock: string, tagName: string): string {
 const KNOWN_XML_TAGS = [
   "name", "brand", "description", "Couleur", "autotag_size", "image1",
   "linkvariation", "Gamme", "material", "Type", "Forme", "price",
-  "old_price", "reference", "link", "gender",
+  "old_price", "reference", "link", "gender", "quantity",
 ];
 
 function extractExtraFields(xmlBlock: string, knownTags: string[]): Record<string, string> {
@@ -79,6 +85,7 @@ function parseXMLProducts(xmlContent: string): ParsedProduct[] {
       forme: extractCDATA(block, "Forme"), price: extractCDATA(block, "price"),
       old_price: extractCDATA(block, "old_price"), reference: extractCDATA(block, "reference"),
       link: extractCDATA(block, "link"), gender: extractCDATA(block, "gender"),
+      quantity: extractCDATA(block, "quantity"),
     };
     const extraFields = extractExtraFields(block, KNOWN_XML_TAGS);
     if (Object.keys(extraFields).length > 0) product.extraFields = extraFields;
@@ -86,8 +93,9 @@ function parseXMLProducts(xmlContent: string): ParsedProduct[] {
   });
 }
 
-function groupProductsByReference(products: ParsedProduct[]): ConsolidatedProduct[] {
+function flattenProducts(products: ParsedProduct[]): FlatProduct[] {
   const groups = new Map<string, { base: ParsedProduct | null; variations: ParsedProduct[] }>();
+
   for (const product of products) {
     const ref = product.reference ?? "";
     const underscoreIdx = ref.indexOf("_");
@@ -98,26 +106,42 @@ function groupProductsByReference(products: ParsedProduct[]): ConsolidatedProduc
     if (underscoreIdx === -1) group.base = product;
     else group.variations.push(product);
   }
-  const consolidated: ConsolidatedProduct[] = [];
+
+  const flat: FlatProduct[] = [];
   for (const [, group] of groups) {
     const base = group.base ?? group.variations[0];
     if (!base) continue;
-    const sizes = new Set<string>();
-    const colors = new Set<string>();
-    if (base.size) sizes.add(base.size);
-    if (base.color) colors.add(base.color);
-    for (const v of group.variations) {
-      if (v.size) sizes.add(v.size);
-      if (v.color) colors.add(v.color);
+    const baseRef = base.reference.split("_")[0] || base.reference;
+
+    if (group.variations.length === 0) {
+      // Producto sin variaciones → una sola fila
+      flat.push({
+        baseRef,
+        reference: base.reference,
+        name: base.name, brand: base.brand, description: base.description,
+        color: base.color, size: base.size,
+        image1: base.image1, gamme: base.gamme, material: base.material,
+        type: base.type, forme: base.forme, price: base.price, old_price: base.old_price,
+        link: base.link, gender: base.gender, quantity: base.quantity,
+        product_url: base.linkvariation || base.link || "",
+      });
+    } else {
+      // Producto con variaciones → una fila por variación
+      for (const v of group.variations) {
+        flat.push({
+          baseRef,
+          reference: v.reference,
+          name: base.name, brand: base.brand, description: base.description,
+          color: v.color, size: v.size,
+          image1: base.image1, gamme: base.gamme, material: base.material,
+          type: base.type, forme: base.forme, price: base.price, old_price: base.old_price,
+          link: base.link, gender: base.gender, quantity: v.quantity,
+          product_url: v.linkvariation || base.link || "",
+        });
+      }
     }
-    consolidated.push({
-      ...base,
-      product_url: base.linkvariation || base.link || "",
-      allSizes: [...sizes].filter(Boolean),
-      allColors: [...colors].filter(Boolean),
-    });
   }
-  return consolidated;
+  return flat;
 }
 
 function normalizeUrl(url: string | null | undefined): string | null {
@@ -194,18 +218,19 @@ export async function syncProducts(): Promise<void> {
   const allProducts = parseXMLProducts(xmlContent);
   console.log(`[sync] ${allProducts.length} registros parseados`);
 
-  const products = groupProductsByReference(allProducts);
-  console.log(`[sync] ${products.length} productos unicos consolidados`);
+  const products = flattenProducts(allProducts);
+  console.log(`[sync] ${products.length} variaciones planas generadas`);
 
   const activeRefs = new Set<string>();
   type SyncRow = {
-    clientId: string; productId: string; name: string;
+    clientId: string; productId: string; baseProductId: string; name: string;
     brand: string | null; type: string | null; subType: string | null;
     gender: string | null; price: number | null; oldPrice: number | null;
     hasDiscount: boolean; discountPct: number;
     color: string | null; sizes: string | null; materials: string | null;
     styles: string | null; collection: string | null;
     imageUrl: string | null; productUrl: string | null; description: string | null;
+    quantity: number | null;
   };
   const rows: SyncRow[] = [];
 
@@ -216,17 +241,18 @@ export async function syncProducts(): Promise<void> {
     const oldPrice = parseFloat(p.old_price) || null;
     const { hasDiscount, discountPct } = calculateDiscount(price ?? 0, oldPrice ?? 0);
     rows.push({
-      clientId: CLIENT_ID, productId: p.reference,
+      clientId: CLIENT_ID, productId: p.reference, baseProductId: p.baseRef,
       name: extractCleanName(p.name),
       brand: p.brand || null, type: p.type || null, subType: p.forme || null,
       gender: p.gender || null, price, oldPrice, hasDiscount, discountPct,
-      color: p.allColors.join(", ") || p.color || null,
-      sizes: p.allSizes.join(", ") || null,
+      color: p.color || null,
+      sizes: p.size || null,
       materials: p.material || null,
       styles: extractStyles(p.name, p.description) || null,
       collection: p.gamme || null, imageUrl: p.image1 || null,
       productUrl: normalizeUrl(p.product_url) || null,
       description: cleanDescription(p.description),
+      quantity: p.quantity ? parseInt(p.quantity, 10) || null : null,
     });
   }
 
@@ -240,25 +266,26 @@ export async function syncProducts(): Promise<void> {
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     await Promise.all(batches.slice(i, i + CONCURRENCY).map(async (batch) => {
       const values = batch.map((r) =>
-        Prisma.sql`(${r.clientId}, ${r.productId}, ${r.name},
+        Prisma.sql`(${r.clientId}, ${r.productId}, ${r.baseProductId}, ${r.name},
           ${r.brand}, ${r.type}, ${r.subType}, ${r.gender},
           ${r.price}, ${r.oldPrice}, ${r.hasDiscount}, ${r.discountPct},
           ${r.color}, ${r.sizes}, ${r.materials}, ${r.styles},
           ${r.collection}, ${r.imageUrl}, ${r.productUrl}, ${r.description},
-          true, ${now})`
+          ${r.quantity}, true, ${now})`
       );
       await prisma.$executeRaw`
         INSERT INTO products (
-          client_id, product_id, name,
+          client_id, product_id, base_product_id, name,
           brand, type, sub_type, gender,
           price, old_price, has_discount, discount_pct,
           color, sizes, materials, styles,
           collection, image_url, product_url, description,
-          active, synced_at
+          quantity, active, synced_at
         )
         VALUES ${Prisma.join(values)}
         ON CONFLICT (client_id, product_id)
         DO UPDATE SET
+          base_product_id = EXCLUDED.base_product_id,
           name         = EXCLUDED.name,
           brand        = EXCLUDED.brand,
           type         = EXCLUDED.type,
@@ -276,6 +303,7 @@ export async function syncProducts(): Promise<void> {
           image_url    = EXCLUDED.image_url,
           product_url  = EXCLUDED.product_url,
           description  = EXCLUDED.description,
+          quantity     = EXCLUDED.quantity,
           active       = true,
           synced_at    = EXCLUDED.synced_at
       `;

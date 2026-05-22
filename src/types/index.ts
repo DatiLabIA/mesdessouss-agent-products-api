@@ -4,6 +4,7 @@ export interface ProductSearchInput {
   gender?: "female" | "male";
   brand?: string | string[];
   color?: string | string[];
+  material?: string | string[];
   max_price?: number;
   min_price?: number;
   sub_type?: string | string[];
@@ -20,6 +21,7 @@ export interface StorePoliciesInput {
 
 export interface ProductResult {
   id: string;
+  base_product_id: string;
   name: string;
   brand: string | null;
   type: string | null;
@@ -28,8 +30,11 @@ export interface ProductResult {
   old_price: number | null;
   has_discount: boolean;
   discount_percentage: number;
-  sizes_available: string[];
-  colors_available: string[];
+  size: string | null;
+  color: string | null;
+  material: string | null;
+  quantity: number;
+  in_stock: boolean;
   url: string | null;
   image_url: string | null;
   description: string | null;
