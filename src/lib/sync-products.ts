@@ -312,6 +312,12 @@ export async function syncProducts(): Promise<void> {
     console.log(`[sync] ${Math.min(upserted, rows.length)}/${rows.length} productos sincronizados...`);
   }
 
+  const MIN_ACTIVE_REFS = 1000;
+  if (activeRefs.size < MIN_ACTIVE_REFS) {
+    console.error(`[sync] ABORTANDO deactivación: solo ${activeRefs.size} refs activos — posible feed vacío o incompleto. Se requieren al menos ${MIN_ACTIVE_REFS}.`);
+    return;
+  }
+
   const deactivated = await prisma.product.updateMany({
     where: { clientId: CLIENT_ID, active: true, NOT: { productId: { in: [...activeRefs] } } },
     data: { active: false, syncedAt: new Date() },
