@@ -208,6 +208,15 @@ async function loadXml(): Promise<string> {
   return fs.readFileSync(LOCAL_XML, "utf-8");
 }
 
+// --- Normaliza valores de género del XML (francés o inglés) ---
+function normalizeGender(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const g = raw.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (g === "male" || g === "masculin" || g === "homme") return "male";
+  if (g === "female" || g === "feminin" || g === "femme") return "female";
+  return null;
+}
+
 // --- Función principal exportada ---
 
 export async function syncProducts(): Promise<void> {
@@ -244,7 +253,7 @@ export async function syncProducts(): Promise<void> {
       clientId: CLIENT_ID, productId: p.reference, baseProductId: p.baseRef,
       name: extractCleanName(p.name),
       brand: p.brand || null, type: p.type || null, subType: p.forme || null,
-      gender: p.gender || null, price, oldPrice, hasDiscount, discountPct,
+      gender: normalizeGender(p.gender), price, oldPrice, hasDiscount, discountPct,
       color: p.color || null,
       sizes: p.size || null,
       materials: p.material || null,
@@ -318,11 +327,16 @@ export async function syncProducts(): Promise<void> {
     return;
   }
 
-  const deactivated = await prisma.product.updateMany({
-    where: { clientId: CLIENT_ID, active: true, NOT: { productId: { in: [...activeRefs] } } },
-    data: { active: false, syncedAt: new Date() },
-  });
+  // Deactivar filas que NO fueron tocadas en este sync (synced_at < now).
+  // Evita el límite de parámetros de NOT IN con ~97k elementos.
+  const deactivated = await prisma.$executeRaw`
+    UPDATE products
+    SET active = false, synced_at = ${now}
+    WHERE client_id = ${CLIENT_ID}
+      AND active = true
+      AND synced_at < ${now}
+  `;
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(`[sync] Completado: ${upserted} upserted, ${deactivated.count} desactivados — ${elapsed}s`);
+  console.log(`[sync] Completado: ${upserted} upserted, ${deactivated} desactivados — ${elapsed}s`);
 }
