@@ -141,7 +141,7 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
                  has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
           FROM products
           WHERE ${whereClause}
-          ORDER BY has_discount DESC, price ASC
+          ORDER BY (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
           LIMIT 15
         `
       : await prisma.$queryRaw<ProductRow[]>`
@@ -149,7 +149,7 @@ export async function productSearch(req: Request, res: Response): Promise<void> 
                  has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
           FROM products
           WHERE ${whereClause}
-          ORDER BY base_product_id, has_discount DESC, price ASC
+          ORDER BY base_product_id, (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
           LIMIT 10
         `;
 
