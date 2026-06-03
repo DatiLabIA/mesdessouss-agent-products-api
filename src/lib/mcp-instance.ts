@@ -36,6 +36,31 @@ export function createMcpServer(): McpServer {
     }
   );
 
+  // ─── get_all_knowledge_bases ─────────────────────────────────────────────
+  server.tool(
+    "get_all_knowledge_bases",
+    "Devuelve el contenido completo de TODOS los topics almacenados. Útil para hacer un inventario completo o migrar datos.",
+    {},
+    async () => {
+      const policies = await prisma.storePolicy.findMany({
+        where: { clientId: CLIENT_ID },
+        orderBy: { topic: "asc" },
+      });
+      if (policies.length === 0) {
+        return { content: [{ type: "text", text: "No hay topics almacenados." }] };
+      }
+      const rows = policies
+        .map(
+          (p) =>
+            `### ${p.topic}\n_Actualizado: ${p.updatedAt.toISOString()}_\n\n\`\`\`json\n${JSON.stringify(p.content, null, 2)}\n\`\`\``
+        )
+        .join("\n\n---\n\n");
+      return {
+        content: [{ type: "text", text: `# Base de conocimientos — ${policies.length} topics\n\n${rows}` }],
+      };
+    }
+  );
+
   // ─── get_knowledge_base ──────────────────────────────────────────────────
   server.tool(
     "get_knowledge_base",
@@ -65,16 +90,22 @@ export function createMcpServer(): McpServer {
   // ─── update_knowledge_base ───────────────────────────────────────────────
   server.tool(
     "update_knowledge_base",
-    "Crea o reemplaza completamente el contenido de un topic. Si no existe, lo crea.",
+    "Crea o reemplaza completamente el contenido de un topic. Si no existe, lo crea. Acepta cualquier valor JSON: objeto, array o string.",
     {
       topic: z.string().describe("Nombre del topic (ej: livraison, retours, guide_tailles_aubade)"),
-      content: z.record(z.string(), z.unknown()).describe("Contenido del topic como objeto JSON"),
+      content: z
+        .union([
+          z.record(z.string(), z.unknown()),
+          z.array(z.unknown()),
+          z.string(),
+        ])
+        .describe("Contenido del topic: puede ser un objeto JSON, un array o un string de texto"),
     },
     async ({ topic, content }) => {
       const policy = await prisma.storePolicy.upsert({
         where: { clientId_topic: { clientId: CLIENT_ID, topic } },
-        update: { content: content as object },
-        create: { clientId: CLIENT_ID, topic, content: content as object },
+        update: { content: content as never },
+        create: { clientId: CLIENT_ID, topic, content: content as never },
       });
       return {
         content: [{

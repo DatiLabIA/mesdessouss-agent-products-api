@@ -42,7 +42,11 @@ app.use((req, res, next) => {
   }
 
   const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  // Permite API key también como query param ?key=... para clientes MCP remotos
+  // que no soporten headers personalizados (ej: Claude.ai connector)
+  const queryToken = typeof req.query.key === "string" ? req.query.key : null;
+  const token = bearerToken ?? queryToken;
 
   if (token !== apiKey) {
     res.status(401).json({ error: "Unauthorized" });
