@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import cron from "node-cron";
 import { mesdessousRouter } from "./routes/mesdessous.routes";
 import { adminRouter } from "./routes/admin.routes";
@@ -8,6 +9,7 @@ import { syncProducts } from "./lib/sync-products";
 const app = express();
 
 app.use(express.json());
+app.use(cors());
 
 // Health check — sin autenticación
 app.get("/health", (_req, res) => {
