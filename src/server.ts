@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cron from "node-cron";
 import { mesdessousRouter } from "./routes/mesdessous.routes";
+import { adminRouter } from "./routes/admin.routes";
 import { syncProducts } from "./lib/sync-products";
 
 const app = express();
@@ -35,6 +36,7 @@ app.use((req, res, next) => {
 });
 
 app.use("/mesdessous", mesdessousRouter);
+app.use("/admin", adminRouter);
 
 // 404 catch-all
 app.use((_req, res) => {
