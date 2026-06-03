@@ -8,16 +8,30 @@ import { syncProducts } from "./lib/sync-products";
 
 const app = express();
 
-app.use(express.json());
-app.use(cors());
+// 1. CORS primero — antes de todo, incluido auth
+// El preflight OPTIONS debe pasar sin autenticación
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 
-// Health check — sin autenticación
+// 2. Parseo de body
+app.use(express.json());
+
+// 3. Health check — sin autenticación
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Autenticación por Bearer token
+// 4. Autenticación por Bearer token (después de CORS y health)
 app.use((req, res, next) => {
+  // Dejar pasar preflights OPTIONS — CORS ya los manejó
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
   const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
@@ -50,12 +64,9 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.listen(PORT, () => {
   console.log(`[server] Catalog Service running on port ${PORT}`);
 
-  // Sincronización automática cada 6 horas (solo en producción)
   if (process.env.NODE_ENV === "production") {
-    // Ejecutar una vez al arrancar para tener el catálogo fresco
     syncProducts().catch((err) => console.error("[sync] Error en sync inicial:", err));
 
-    // Cada 6 horas: 0 0,6,12,18 * * *
     cron.schedule("0 0,6,12,18 * * *", () => {
       console.log("[sync] Iniciando sync programado...");
       syncProducts().catch((err) => console.error("[sync] Error en sync programado:", err));
