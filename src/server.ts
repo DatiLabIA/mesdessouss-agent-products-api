@@ -4,6 +4,7 @@ import cors from "cors";
 import cron from "node-cron";
 import { mesdessousRouter } from "./routes/mesdessous.routes";
 import { adminRouter } from "./routes/admin.routes";
+import { mcpRouter } from "./routes/mcp.routes";
 import { syncProducts } from "./lib/sync-products";
 
 const app = express();
@@ -53,6 +54,7 @@ app.use((req, res, next) => {
 
 app.use("/mesdessous", mesdessousRouter);
 app.use("/admin", adminRouter);
+app.use("/mcp", mcpRouter);
 
 // 404 catch-all
 app.use((_req, res) => {

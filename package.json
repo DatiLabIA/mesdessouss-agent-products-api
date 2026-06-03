@@ -14,9 +14,11 @@
     "migrate:deploy": "prisma migrate deploy",
     "sync:products": "tsx scripts/sync-products.ts",
     "seed:size-guides": "tsx scripts/seed-size-guides.ts",
-    "seed:policies": "tsx scripts/seed-policies.ts"
+    "seed:policies": "tsx scripts/seed-policies.ts",
+    "mcp": "tsx src/mcp-server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@prisma/config": "^7.8.0",
@@ -26,7 +28,8 @@
     "node-cron": "^4.2.1",
     "once": "^1.4.0",
     "pg": "^8.21.0",
-    "prisma": "^7.8.0"
+    "prisma": "^7.8.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
