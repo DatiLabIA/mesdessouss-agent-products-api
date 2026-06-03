@@ -87,6 +87,42 @@ export function createMcpServer(): McpServer {
     }
   );
 
+  // ─── create_knowledge_base ───────────────────────────────────────────────
+  server.tool(
+    "create_knowledge_base",
+    "Crea un nuevo topic en la base de conocimientos. Si el topic ya existe, devuelve un error en lugar de sobreescribirlo (usa update_knowledge_base para reemplazar contenido existente).",
+    {
+      topic: z.string().describe("Nombre del nuevo topic (ej: livraison, retours, guide_tailles_aubade)"),
+      content: z
+        .union([
+          z.record(z.string(), z.unknown()),
+          z.array(z.unknown()),
+          z.string(),
+        ])
+        .describe("Contenido del topic: puede ser un objeto JSON, un array o un string de texto"),
+    },
+    async ({ topic, content }) => {
+      const existing = await prisma.storePolicy.findUnique({
+        where: { clientId_topic: { clientId: CLIENT_ID, topic } },
+      });
+      if (existing) {
+        return {
+          content: [{ type: "text", text: `El topic '${topic}' ya existe. Usa update_knowledge_base para reemplazarlo o patch_knowledge_base para modificarlo parcialmente.` }],
+          isError: true,
+        };
+      }
+      const policy = await prisma.storePolicy.create({
+        data: { clientId: CLIENT_ID, topic, content: content as never },
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `✓ Topic '${policy.topic}' creado correctamente.\nCreado: ${policy.updatedAt.toISOString()}`,
+        }],
+      };
+    }
+  );
+
   // ─── update_knowledge_base ───────────────────────────────────────────────
   server.tool(
     "update_knowledge_base",
