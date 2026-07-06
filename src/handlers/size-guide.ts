@@ -1,19 +1,7 @@
 import { Request, Response } from "express";
-import { prisma } from "../lib/prisma";
 import { logQuery } from "../lib/audit";
+import { getSizeGuide } from "../lib/policy-queries";
 import type { SizeGuideInput } from "../types";
-
-const CLIENT_ID = "mesdessous";
-
-/** Product types that belong to men's underwear — used to select the fallback guide. */
-const MALE_PRODUCT_TYPES = new Set([
-  "boxer", "slip homme", "caleçon", "t-shirt homme",
-  "sous-vêtement homme", "underwear homme", "chaussettes homme",
-]);
-
-function normalizeBrand(brand: string): string {
-  return brand.toLowerCase().replace(/[\s-]+/g, "_").replace(/_+/g, "_");
-}
 
 export async function sizeGuide(req: Request, res: Response): Promise<void> {
   const start = Date.now();
@@ -25,48 +13,15 @@ export async function sizeGuide(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const isHomme = MALE_PRODUCT_TYPES.has((product_type ?? "").toLowerCase());
-    const fallbackTopic = isHomme ? "guide_mesure_homme" : "guide_mesure_femme";
+    const result = await getSizeGuide(product_type, brand);
 
-    // Try brand-specific guide first
-    if (brand) {
-      const brandTopic = `guide_tailles_${normalizeBrand(brand)}`;
-      const policy = await prisma.storePolicy.findUnique({
-        where: { clientId_topic: { clientId: CLIENT_ID, topic: brandTopic } },
-      });
-
-      if (policy) {
-        logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 1, durationMs: Date.now() - start });
-        res.json({ topic: policy.topic, brand, product_type: product_type ?? null, content: policy.content });
-        return;
-      }
-    }
-
-    // Fallback: generic measurement guide
-    const fallback = await prisma.storePolicy.findUnique({
-      where: { clientId_topic: { clientId: CLIENT_ID, topic: fallbackTopic } },
+    logQuery({
+      endpoint: "size_guide",
+      input: { product_type, brand },
+      resultCount: result.content !== null ? 1 : 0,
+      durationMs: Date.now() - start,
     });
-
-    if (fallback) {
-      logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 1, durationMs: Date.now() - start });
-      res.json({
-        topic: fallback.topic,
-        brand: brand ?? null,
-        product_type: product_type ?? null,
-        content: fallback.content,
-        ...(brand ? { note: `Guide spécifique pour '${brand}' non disponible. Guide général fourni.` } : {}),
-      });
-      return;
-    }
-
-    logQuery({ endpoint: "size_guide", input: { product_type, brand }, resultCount: 0, durationMs: Date.now() - start });
-    res.json({
-      topic: null,
-      brand: brand ?? null,
-      product_type: product_type ?? null,
-      content: null,
-      message: "Aucun guide de tailles disponible pour cette recherche.",
-    });
+    res.json(result);
   } catch (err) {
     console.error("[size_guide] Error:", err);
     res.json({ error: "Erreur interne lors de la récupération du guide de tailles" });

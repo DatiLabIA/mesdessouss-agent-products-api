@@ -1,8 +1,20 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prisma } from "./prisma";
+import {
+  searchProducts,
+  getCatalogOptions,
+  ProductSearchValidationError,
+  CatalogFieldValidationError,
+  CATALOG_FIELDS,
+} from "./product-queries";
+import { getStorePolicy, getSizeGuide } from "./policy-queries";
+import type { ProductSearchInput } from "../types";
 
 const CLIENT_ID = "mesdessous";
+
+/** Acepta un string o un array de strings (para filtros multi-valor de la tool MCP). */
+const stringOrArray = z.union([z.string(), z.array(z.string())]);
 
 /** Crea y configura una instancia de McpServer con todas las tools de knowledge base. */
 export function createMcpServer(): McpServer {
@@ -242,6 +254,131 @@ export function createMcpServer(): McpServer {
         .join("\n\n");
       return {
         content: [{ type: "text", text: `Se encontraron ${matches.length} topics:\n\n${rows}` }],
+      };
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  PRODUCTOS — SOLO LECTURA (búsquedas y catálogo, sin edición)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ─── search_products ─────────────────────────────────────────────────────
+  server.tool(
+    "search_products",
+    "Busca productos del catálogo (solo lectura) aplicando filtros. El campo 'type' es obligatorio. Los filtros multi-valor (type, size, brand, color, material, sub_type) aceptan un string o un array y se combinan con OR. Devuelve hasta 10-15 productos con precio, stock, descuento, tallas, color, URL e imagen.",
+    {
+      type: stringOrArray.describe("OBLIGATORIO. Tipo(s) de producto a buscar (ej: 'soutien-gorge', 'boxer', ['culotte','string'])"),
+      size: stringOrArray.optional().describe("Talla(s) (ej: '95C', 'M', ['85B','90B'])"),
+      gender: z.enum(["female", "male"]).optional().describe("Género del producto"),
+      brand: stringOrArray.optional().describe("Marca(s) (ej: 'Aubade', ['Chantelle','Triumph'])"),
+      color: stringOrArray.optional().describe("Color(es) (ej: 'noir', ['rouge','blanc'])"),
+      material: stringOrArray.optional().describe("Material(es) (ej: 'coton', 'dentelle')"),
+      sub_type: stringOrArray.optional().describe("Subtipo(s) o texto a buscar también en el nombre"),
+      min_price: z.number().optional().describe("Precio mínimo"),
+      max_price: z.number().optional().describe("Precio máximo"),
+    },
+    async (input) => {
+      try {
+        const response = await searchProducts(input as ProductSearchInput);
+        if (response.products.length === 0) {
+          return {
+            content: [{ type: "text", text: response.suggestion ?? "No se encontraron productos con esos filtros." }],
+          };
+        }
+        return {
+          content: [{
+            type: "text",
+            text: `Se encontraron ${response.total} producto(s):\n\n\`\`\`json\n${JSON.stringify(response.products, null, 2)}\n\`\`\``,
+          }],
+        };
+      } catch (err) {
+        if (err instanceof ProductSearchValidationError) {
+          return { content: [{ type: "text", text: err.message }], isError: true };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // ─── get_catalog_options ─────────────────────────────────────────────────
+  server.tool(
+    "get_catalog_options",
+    `Devuelve los valores distintos disponibles de un campo del catálogo (solo lectura). Útil para descubrir qué tipos, marcas, colores, etc. existen antes de buscar. Campos válidos: ${CATALOG_FIELDS.join(", ")}. Se puede acotar con filtros opcionales.`,
+    {
+      field: z.enum(CATALOG_FIELDS).describe("Campo del que se quieren los valores distintos (ej: 'type', 'brand', 'color')"),
+      filters: z
+        .object({
+          gender: z.string().optional().describe("Acotar por género (female/male)"),
+          brand: z.string().optional().describe("Acotar por marca"),
+          type: z.string().optional().describe("Acotar por tipo"),
+          subType: z.string().optional().describe("Acotar por subtipo"),
+        })
+        .optional()
+        .describe("Filtros opcionales para acotar los valores devueltos"),
+    },
+    async ({ field, filters }) => {
+      try {
+        const result = await getCatalogOptions(field, filters ?? {});
+        return {
+          content: [{
+            type: "text",
+            text: result.count > 0
+              ? `Campo '${result.field}' — ${result.count} valor(es):\n\n${result.values.map((v) => `- ${v}`).join("\n")}`
+              : `No hay valores disponibles para '${result.field}' con esos filtros.`,
+          }],
+        };
+      } catch (err) {
+        if (err instanceof CatalogFieldValidationError) {
+          return { content: [{ type: "text", text: err.message }], isError: true };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // ─── get_size_guide ──────────────────────────────────────────────────────
+  server.tool(
+    "get_size_guide",
+    "Obtiene el guía de tallas (solo lectura). Intenta primero el guía específico de la marca y, si no existe, devuelve el guía genérico de medidas (mujer u hombre según el tipo de producto). Requiere 'product_type' o 'brand'.",
+    {
+      product_type: z.string().optional().describe("Tipo de producto (ej: 'soutien-gorge', 'boxer')"),
+      brand: z.string().optional().describe("Marca para obtener su guía específica (ej: 'Aubade')"),
+    },
+    async ({ product_type, brand }) => {
+      if (!product_type && !brand) {
+        return { content: [{ type: "text", text: "Se requiere 'product_type' o 'brand'." }], isError: true };
+      }
+      const result = await getSizeGuide(product_type, brand);
+      if (result.content === null) {
+        return { content: [{ type: "text", text: result.message ?? "No hay guía de tallas disponible." }] };
+      }
+      const note = result.note ? `_${result.note}_\n\n` : "";
+      return {
+        content: [{
+          type: "text",
+          text: `**Guía:** ${result.topic}\n${note}\`\`\`json\n${JSON.stringify(result.content, null, 2)}\n\`\`\``,
+        }],
+      };
+    }
+  );
+
+  // ─── get_store_policy ────────────────────────────────────────────────────
+  server.tool(
+    "get_store_policy",
+    "Obtiene una política/tema de la tienda (livraison, retours, paiement, etc.) resolviendo automáticamente aliases en inglés/español/francés. Solo lectura. Para listar todos los temas disponibles usa list_knowledge_bases.",
+    {
+      topic: z.string().describe("Tema a consultar. Acepta aliases, ej: 'delivery', 'devoluciones', 'retours', 'payment'"),
+    },
+    async ({ topic }) => {
+      const result = await getStorePolicy(topic);
+      if (result.content === null) {
+        return { content: [{ type: "text", text: result.message ?? `Tema '${topic}' no encontrado.` }] };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: `**Tema:** ${result.topic}\n\n\`\`\`json\n${JSON.stringify(result.content, null, 2)}\n\`\`\``,
+        }],
       };
     }
   );
