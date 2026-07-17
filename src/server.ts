@@ -6,6 +6,7 @@ import { mesdessousRouter } from "./routes/mesdessous.routes";
 import { adminRouter } from "./routes/admin.routes";
 import { mcpRouter } from "./routes/mcp.routes";
 import { syncProducts } from "./lib/sync-products";
+import { syncCategories } from "./lib/sync-categories";
 
 const app = express();
 
@@ -78,5 +79,14 @@ app.listen(PORT, () => {
       syncProducts().catch((err) => console.error("[sync] Error en sync programado:", err));
     });
     console.log("[sync] Scheduler activo — cada 6 horas");
+
+    // Categorías: el feed JSON se actualiza una vez al día → sync diario a medianoche.
+    syncCategories().catch((err) => console.error("[sync-cat] Error en sync inicial:", err));
+
+    cron.schedule("0 0 * * *", () => {
+      console.log("[sync-cat] Iniciando sync de categorías programado...");
+      syncCategories().catch((err) => console.error("[sync-cat] Error en sync programado:", err));
+    });
+    console.log("[sync-cat] Scheduler de categorías activo — diario 00:00 (hora del servidor)");
   }
 });

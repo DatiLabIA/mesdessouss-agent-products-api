@@ -116,6 +116,20 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     conditions.push(Prisma.sql`(${Prisma.join(matClauses, " OR ")})`);
   }
 
+  // category: OR entre todas las categorías (join a product_categories vía base_product_id)
+  const categories = toArray(input.category);
+  if (categories.length > 0) {
+    const catClauses = categories.map(
+      (c) => Prisma.sql`EXISTS (
+        SELECT 1 FROM product_categories pc
+        WHERE pc.client_id = products.client_id
+          AND pc.base_product_id = products.base_product_id
+          AND LOWER(pc.category) LIKE ${`%${c.toLowerCase()}%`}
+      )`
+    );
+    conditions.push(Prisma.sql`(${Prisma.join(catClauses, " OR ")})`);
+  }
+
   if (input.gender) {
     conditions.push(Prisma.sql`gender = ${input.gender}`);
   }
@@ -168,7 +182,29 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     url: row.product_url,
     image_url: row.image_url,
     description: row.description,
+    categories: [],
   }));
+
+  // Adjuntar las categorías de cada producto (join por base_product_id)
+  if (products.length > 0) {
+    const baseIds = [...new Set(rows.map((r) => r.base_product_id))];
+    const catRows = await prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
+      SELECT base_product_id, category
+      FROM product_categories
+      WHERE client_id = ${CLIENT_ID}
+        AND base_product_id IN (${Prisma.join(baseIds)})
+      ORDER BY category ASC
+    `;
+    const catsByBase = new Map<string, string[]>();
+    for (const cr of catRows) {
+      const list = catsByBase.get(cr.base_product_id) ?? [];
+      list.push(cr.category);
+      catsByBase.set(cr.base_product_id, list);
+    }
+    for (const p of products) {
+      p.categories = catsByBase.get(p.base_product_id) ?? [];
+    }
+  }
 
   const response: ProductSearchResponse = {
     products,
@@ -196,11 +232,13 @@ export const CATALOG_FIELDS = [
   "styles",
   "materials",
   "collection",
+  "category",
 ] as const;
 export type CatalogField = (typeof CATALOG_FIELDS)[number];
 
-// Campo lógico → columna SQL (para raw DISTINCT)
-const COLUMN_MAP: Record<CatalogField, string> = {
+// Campos que son columnas directas de `products` → columna SQL (para raw DISTINCT).
+// `category` NO está aquí: vive en la tabla product_categories (manejo aparte).
+const COLUMN_MAP: Record<Exclude<CatalogField, "category">, string> = {
   type: "type",
   subType: "sub_type",
   brand: "brand",
@@ -242,6 +280,11 @@ export async function getCatalogOptions(
     );
   }
 
+  // `category` vive en product_categories; se resuelve con un join opcional a products.
+  if (field === "category") {
+    return getCategoryOptions(filters);
+  }
+
   const column = COLUMN_MAP[field];
 
   const conditions: Prisma.Sql[] = [
@@ -268,4 +311,45 @@ export async function getCatalogOptions(
   const values = rows.map((r) => r.value).filter(Boolean);
 
   return { field, filters, count: values.length, values };
+}
+
+/**
+ * Valores distintos de categoría (tabla product_categories). Si hay filtros,
+ * solo considera categorías de productos activos que cumplan esos filtros.
+ */
+async function getCategoryOptions(filters: CatalogOptionsFilters): Promise<CatalogOptionsResult> {
+  const hasFilters = Boolean(filters.gender || filters.brand || filters.type || filters.subType);
+
+  let rows: { value: string }[];
+  if (!hasFilters) {
+    rows = await prisma.$queryRaw<{ value: string }[]>`
+      SELECT DISTINCT category AS value
+      FROM product_categories
+      WHERE client_id = ${CLIENT_ID}
+      ORDER BY category ASC
+    `;
+  } else {
+    const productConds: Prisma.Sql[] = [
+      Prisma.sql`p.client_id = ${CLIENT_ID}`,
+      Prisma.sql`p.active = true`,
+    ];
+    if (filters.gender) productConds.push(Prisma.sql`p.gender = ${filters.gender}`);
+    if (filters.brand) productConds.push(Prisma.sql`LOWER(p.brand) = LOWER(${filters.brand})`);
+    if (filters.type) productConds.push(Prisma.sql`LOWER(p.type) = LOWER(${filters.type})`);
+    if (filters.subType) productConds.push(Prisma.sql`LOWER(p.sub_type) = LOWER(${filters.subType})`);
+    const where = Prisma.join(productConds, " AND ");
+
+    rows = await prisma.$queryRaw<{ value: string }[]>(
+      Prisma.sql`SELECT DISTINCT pc.category AS value
+                 FROM product_categories pc
+                 JOIN products p
+                   ON p.client_id = pc.client_id
+                  AND p.base_product_id = pc.base_product_id
+                 WHERE ${where}
+                 ORDER BY pc.category ASC`
+    );
+  }
+
+  const values = rows.map((r) => r.value).filter(Boolean);
+  return { field: "category", filters, count: values.length, values };
 }

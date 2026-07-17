@@ -55,6 +55,19 @@ model QueryLog {
   @@map("query_logs")
 }
 
+model ProductCategory {
+  id            Int      @id @default(autoincrement())
+  clientId      String   @map("client_id") @db.VarChar(50)
+  baseProductId String   @map("base_product_id") @db.VarChar(50)
+  category      String   @db.VarChar(255)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@unique([clientId, baseProductId, category])
+  @@index([clientId, category])
+  @@index([clientId, baseProductId])
+  @@map("product_categories")
+}
+
 model StorePolicy {
   id        Int      @id @default(autoincrement())
   clientId  String   @map("client_id") @db.VarChar(50)

@@ -8,6 +8,7 @@ export interface ProductSearchInput {
   max_price?: number;
   min_price?: number;
   sub_type?: string | string[];
+  category?: string | string[];
 }
 
 export interface SizeGuideInput {
@@ -38,6 +39,7 @@ export interface ProductResult {
   url: string | null;
   image_url: string | null;
   description: string | null;
+  categories: string[];
 }
 
 export interface ProductSearchResponse {

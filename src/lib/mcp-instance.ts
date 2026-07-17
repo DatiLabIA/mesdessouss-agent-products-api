@@ -265,7 +265,7 @@ export function createMcpServer(): McpServer {
   // ─── search_products ─────────────────────────────────────────────────────
   server.tool(
     "search_products",
-    "Busca productos del catálogo (solo lectura) aplicando filtros. El campo 'type' es obligatorio. Los filtros multi-valor (type, size, brand, color, material, sub_type) aceptan un string o un array y se combinan con OR. Devuelve hasta 10-15 productos con precio, stock, descuento, tallas, color, URL e imagen.",
+    "Busca productos del catálogo (solo lectura) aplicando filtros. El campo 'type' es obligatorio. Los filtros multi-valor (type, size, brand, color, material, sub_type, category) aceptan un string o un array y se combinan con OR. Devuelve hasta 10-15 productos con precio, stock, descuento, tallas, color, categorías, URL e imagen.",
     {
       type: stringOrArray.describe("OBLIGATORIO. Tipo(s) de producto a buscar (ej: 'soutien-gorge', 'boxer', ['culotte','string'])"),
       size: stringOrArray.optional().describe("Talla(s) (ej: '95C', 'M', ['85B','90B'])"),
@@ -274,6 +274,7 @@ export function createMcpServer(): McpServer {
       color: stringOrArray.optional().describe("Color(es) (ej: 'noir', ['rouge','blanc'])"),
       material: stringOrArray.optional().describe("Material(es) (ej: 'coton', 'dentelle')"),
       sub_type: stringOrArray.optional().describe("Subtipo(s) o texto a buscar también en el nombre"),
+      category: stringOrArray.optional().describe("Categoría(s) del producto (ej: 'Slips', 'Maillots de bain', 'Soldes'). Usa get_catalog_options con field='category' para ver las disponibles"),
       min_price: z.number().optional().describe("Precio mínimo"),
       max_price: z.number().optional().describe("Precio máximo"),
     },
