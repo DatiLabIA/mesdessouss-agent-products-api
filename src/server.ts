@@ -7,6 +7,7 @@ import { adminRouter } from "./routes/admin.routes";
 import { mcpRouter } from "./routes/mcp.routes";
 import { syncProducts } from "./lib/sync-products";
 import { syncCategories } from "./lib/sync-categories";
+import { syncMaterials } from "./lib/sync-materials";
 
 const app = express();
 
@@ -72,13 +73,23 @@ app.listen(PORT, () => {
   console.log(`[server] Catalog Service running on port ${PORT}`);
 
   if (process.env.NODE_ENV === "production") {
-    syncProducts().catch((err) => console.error("[sync] Error en sync inicial:", err));
+    // El enriquecimiento de materiales depende de products.materials → correr DESPUÉS del sync.
+    syncProducts()
+      .then(() => syncMaterials())
+      .catch((err) => console.error("[sync] Error en sync inicial:", err));
 
     cron.schedule("0 0,6,12,18 * * *", () => {
       console.log("[sync] Iniciando sync programado...");
       syncProducts().catch((err) => console.error("[sync] Error en sync programado:", err));
     });
     console.log("[sync] Scheduler activo — cada 6 horas");
+
+    // Materiales: re-derivar la composición estructurada una vez al día (tras el sync de las 00:00).
+    cron.schedule("30 0 * * *", () => {
+      console.log("[sync-mat] Iniciando enriquecimiento de materiales programado...");
+      syncMaterials().catch((err) => console.error("[sync-mat] Error en sync programado:", err));
+    });
+    console.log("[sync-mat] Scheduler de materiales activo — diario 00:30 (hora del servidor)");
 
     // Categorías: el feed JSON se actualiza una vez al día → sync diario a medianoche.
     syncCategories().catch((err) => console.error("[sync-cat] Error en sync inicial:", err));

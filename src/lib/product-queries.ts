@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-import type { ProductSearchInput, ProductSearchResponse, ProductResult } from "../types";
+import { canonicalFiber } from "./material-parser";
+import type { ProductSearchInput, ProductSearchResponse, ProductResult, MaterialComposition } from "../types";
 
 const CLIENT_ID = "mesdessous";
 
@@ -41,6 +42,7 @@ interface ProductRow {
   image_url: string | null;
   description: string | null;
   quantity: number | null;
+  material_rank?: number;
 }
 
 /** Error lanzado cuando falta el campo obligatorio `type`. */
@@ -107,13 +109,30 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     conditions.push(Prisma.sql`(${Prisma.join(subClauses, " OR ")})`);
   }
 
-  // material: OR entre todos los materiales
+  // material: OR entre todos los materiales (substring sobre el campo crudo → matchea
+  // también productos con composición no parseada = degradación elegante).
   const materials = toArray(input.material);
   if (materials.length > 0) {
     const matClauses = materials.map(
       (m) => Prisma.sql`LOWER(materials) LIKE ${`%${m.toLowerCase()}%`}`
     );
     conditions.push(Prisma.sql`(${Prisma.join(matClauses, " OR ")})`);
+  }
+
+  // Fibras canónicas de los materiales pedidos (para umbral y ranking sobre datos parseados).
+  const requestedFibers = [...new Set(materials.map(canonicalFiber).filter((f): f is string => f !== null))];
+  const hasFiberRank = requestedFibers.length > 0;
+
+  // Umbral: exige que la fibra pedida esté ≥ min_material_pct en CUERPO o FORRO.
+  // Productos sin composición parseada no lo cumplen → se excluyen (comportamiento buscado).
+  if (hasFiberRank && input.min_material_pct !== undefined && input.min_material_pct > 0) {
+    conditions.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM product_materials pm
+      WHERE pm.client_id = products.client_id
+        AND pm.base_product_id = products.base_product_id
+        AND pm.fiber IN (${Prisma.join(requestedFibers)})
+        AND pm.pct >= ${input.min_material_pct}
+    )`);
   }
 
   // category: OR entre todas las categorías (join a product_categories vía base_product_id)
@@ -144,24 +163,59 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
 
   const whereClause = Prisma.join(conditions, " AND ");
 
-  // Con talla: filas exactas por variación. Sin talla: deduplicar por base_product_id
-  const rows = sizes.length > 0
-    ? await prisma.$queryRaw<ProductRow[]>`
-        SELECT id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
-               has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
-        FROM products
-        WHERE ${whereClause}
-        ORDER BY (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
-        LIMIT 15
-      `
-    : await prisma.$queryRaw<ProductRow[]>`
-        SELECT DISTINCT ON (base_product_id) id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
-               has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
-        FROM products
-        WHERE ${whereClause}
-        ORDER BY base_product_id, (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
-        LIMIT 10
-      `;
+  // Expresión de ranking: mayor % de la fibra pedida (cuerpo o forro) del producto.
+  const rankExpr = Prisma.sql`(
+    SELECT COALESCE(MAX(pm.pct), 0) FROM product_materials pm
+    WHERE pm.client_id = products.client_id
+      AND pm.base_product_id = products.base_product_id
+      AND pm.fiber IN (${hasFiberRank ? Prisma.join(requestedFibers) : Prisma.sql`''`})
+  )`;
+
+  // Con talla: filas exactas por variación. Sin talla: deduplicar por base_product_id.
+  // Con filtro de material que mapea a fibra conocida: se antepone el ranking por % (fix del bug).
+  let rows: ProductRow[];
+  if (sizes.length > 0) {
+    rows = hasFiberRank
+      ? await prisma.$queryRaw<ProductRow[]>`
+          SELECT id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                 has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity,
+                 ${rankExpr} AS material_rank
+          FROM products
+          WHERE ${whereClause}
+          ORDER BY material_rank DESC, (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
+          LIMIT 15
+        `
+      : await prisma.$queryRaw<ProductRow[]>`
+          SELECT id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                 has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
+          FROM products
+          WHERE ${whereClause}
+          ORDER BY (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
+          LIMIT 15
+        `;
+  } else {
+    rows = hasFiberRank
+      ? await prisma.$queryRaw<ProductRow[]>`
+          SELECT * FROM (
+            SELECT DISTINCT ON (base_product_id) id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                   has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity,
+                   ${rankExpr} AS material_rank
+            FROM products
+            WHERE ${whereClause}
+            ORDER BY base_product_id, (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
+          ) s
+          ORDER BY s.material_rank DESC, (s.quantity > 0) DESC, s.quantity DESC NULLS LAST, s.has_discount DESC, s.price ASC
+          LIMIT 10
+        `
+      : await prisma.$queryRaw<ProductRow[]>`
+          SELECT DISTINCT ON (base_product_id) id, product_id, base_product_id, name, brand, type, sub_type, price, old_price,
+                 has_discount, discount_pct, color, sizes, materials, product_url, image_url, description, quantity
+          FROM products
+          WHERE ${whereClause}
+          ORDER BY base_product_id, (quantity > 0) DESC, quantity DESC NULLS LAST, has_discount DESC, price ASC
+          LIMIT 10
+        `;
+  }
 
   const products: ProductResult[] = rows.map((row) => ({
     id: row.product_id,
@@ -183,26 +237,47 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     image_url: row.image_url,
     description: row.description,
     categories: [],
+    composition: [],
   }));
 
-  // Adjuntar las categorías de cada producto (join por base_product_id)
+  // Adjuntar categorías y composición estructurada de cada producto (join por base_product_id).
   if (products.length > 0) {
     const baseIds = [...new Set(rows.map((r) => r.base_product_id))];
-    const catRows = await prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
-      SELECT base_product_id, category
-      FROM product_categories
-      WHERE client_id = ${CLIENT_ID}
-        AND base_product_id IN (${Prisma.join(baseIds)})
-      ORDER BY category ASC
-    `;
+
+    const [catRows, matRows] = await Promise.all([
+      prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
+        SELECT base_product_id, category
+        FROM product_categories
+        WHERE client_id = ${CLIENT_ID}
+          AND base_product_id IN (${Prisma.join(baseIds)})
+        ORDER BY category ASC
+      `,
+      prisma.$queryRaw<{ base_product_id: string; fiber: string; pct: number; zone: string }[]>`
+        SELECT base_product_id, fiber, pct, zone
+        FROM product_materials
+        WHERE client_id = ${CLIENT_ID}
+          AND base_product_id IN (${Prisma.join(baseIds)})
+        ORDER BY zone ASC, pct DESC
+      `,
+    ]);
+
     const catsByBase = new Map<string, string[]>();
     for (const cr of catRows) {
       const list = catsByBase.get(cr.base_product_id) ?? [];
       list.push(cr.category);
       catsByBase.set(cr.base_product_id, list);
     }
+
+    const compByBase = new Map<string, MaterialComposition[]>();
+    for (const mr of matRows) {
+      const list = compByBase.get(mr.base_product_id) ?? [];
+      list.push({ fiber: mr.fiber, pct: mr.pct, zone: mr.zone });
+      compByBase.set(mr.base_product_id, list);
+    }
+
     for (const p of products) {
       p.categories = catsByBase.get(p.base_product_id) ?? [];
+      p.composition = compByBase.get(p.base_product_id) ?? [];
     }
   }
 

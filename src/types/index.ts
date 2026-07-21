@@ -9,6 +9,14 @@ export interface ProductSearchInput {
   min_price?: number;
   sub_type?: string | string[];
   category?: string | string[];
+  /** % mínimo de la fibra pedida en `material` (cuerpo o forro). Requiere `material`. */
+  min_material_pct?: number;
+}
+
+export interface MaterialComposition {
+  fiber: string;
+  pct: number;
+  zone: string;
 }
 
 export interface SizeGuideInput {
@@ -40,6 +48,8 @@ export interface ProductResult {
   image_url: string | null;
   description: string | null;
   categories: string[];
+  /** Composición estructurada (fibra, %, zona). Vacío si el material no se pudo parsear. */
+  composition: MaterialComposition[];
 }
 
 export interface ProductSearchResponse {

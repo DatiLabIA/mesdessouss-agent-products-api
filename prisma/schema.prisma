@@ -55,6 +55,21 @@ model QueryLog {
   @@map("query_logs")
 }
 
+model ProductMaterial {
+  id            Int      @id @default(autoincrement())
+  clientId      String   @map("client_id") @db.VarChar(50)
+  baseProductId String   @map("base_product_id") @db.VarChar(50)
+  fiber         String   @db.VarChar(40)
+  pct           Int
+  zone          String   @default("corps") @db.VarChar(20)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@unique([clientId, baseProductId, fiber, zone])
+  @@index([clientId, fiber, pct])
+  @@index([clientId, baseProductId])
+  @@map("product_materials")
+}
+
 model ProductCategory {
   id            Int      @id @default(autoincrement())
   clientId      String   @map("client_id") @db.VarChar(50)

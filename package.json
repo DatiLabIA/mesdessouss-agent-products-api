@@ -14,6 +14,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "sync:products": "tsx scripts/sync-products.ts",
     "sync:categories": "tsx scripts/sync-categories.ts",
+    "sync:materials": "tsx scripts/sync-materials.ts",
     "seed:size-guides": "tsx scripts/seed-size-guides.ts",
     "seed:policies": "tsx scripts/seed-policies.ts",
     "mcp": "tsx src/mcp-server.ts"
