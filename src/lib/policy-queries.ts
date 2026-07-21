@@ -47,6 +47,9 @@ export const TOPIC_ALIASES: Record<string, string> = {
   store: "boutique_info",
   boutique: "boutique_info",
   tienda: "boutique_info",
+  company: "boutique_info",
+  entreprise: "boutique_info",
+  horaires: "boutique_info",
 
   contact: "contact",
   contacto: "contact",
@@ -74,6 +77,7 @@ export const TOPIC_ALIASES: Record<string, string> = {
   // ── Operaciones ─────────────────────────────────────────────────────────
   statuses: "lexique_statuts",
   status: "lexique_statuts",
+  orders: "lexique_statuts",
   order_statuses: "lexique_statuts",
   estados: "lexique_statuts",
   estado: "lexique_statuts",
