@@ -11,6 +11,21 @@ export function toArray(val: string | string[] | undefined): string[] {
   return Array.isArray(val) ? val.filter(Boolean) : [val];
 }
 
+/**
+ * Cláusula LIKE insensible a mayúsculas Y acentos (via extensión `unaccent`).
+ * Necesario porque el catálogo francés mezcla acentos (ej: marca guardada "Simone Perele"
+ * pero el cliente busca "Simone Pérèle", o "décolleté" vs "decollete").
+ * `column` es SQL crudo (nombre de columna), `term` va parametrizado.
+ */
+function accentInsensitiveLike(column: string, term: string): Prisma.Sql {
+  return Prisma.sql`unaccent(lower(${Prisma.raw(column)})) LIKE unaccent(lower(${`%${term.toLowerCase()}%`}))`;
+}
+
+/** Igualdad insensible a mayúsculas y acentos (para filtros exactos de catálogo). */
+function accentInsensitiveEq(column: string, value: string): Prisma.Sql {
+  return Prisma.sql`unaccent(lower(${Prisma.raw(column)})) = unaccent(lower(${value}))`;
+}
+
 /** Construye el patrón regex para una talla: "95C" o "95 C" → matchea "95 C (eu 80)" */
 function buildSizePattern(size: string): string | null {
   const normalized = size.trim().replace(/\s+/g, "").toUpperCase();
@@ -64,9 +79,9 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     Prisma.sql`(image_url LIKE '%.jpg' OR image_url LIKE '%.png' OR image_url LIKE '%.webp')`,
   ];
 
-  // type: OR entre todos los valores
+  // type: OR entre todos los valores (insensible a acentos)
   const typeClauses = types.map(
-    (t) => Prisma.sql`(LOWER(type) LIKE ${`%${t.toLowerCase()}%`} OR LOWER(sub_type) LIKE ${`%${t.toLowerCase()}%`})`
+    (t) => Prisma.sql`(${accentInsensitiveLike("type", t)} OR ${accentInsensitiveLike("sub_type", t)})`
   );
   conditions.push(Prisma.sql`(${Prisma.join(typeClauses, " OR ")})`);
 
@@ -82,40 +97,34 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     conditions.push(Prisma.sql`(${Prisma.join(sizeClauses, " OR ")})`);
   }
 
-  // brand: OR entre todas las marcas
+  // brand: OR entre todas las marcas (insensible a acentos → "Simone Pérèle" = "Simone Perele")
   const brands = toArray(input.brand);
   if (brands.length > 0) {
-    const brandClauses = brands.map(
-      (b) => Prisma.sql`LOWER(brand) LIKE ${`%${b.toLowerCase()}%`}`
-    );
+    const brandClauses = brands.map((b) => accentInsensitiveLike("brand", b));
     conditions.push(Prisma.sql`(${Prisma.join(brandClauses, " OR ")})`);
   }
 
-  // color: OR entre todos los colores
+  // color: OR entre todos los colores (insensible a acentos)
   const colors = toArray(input.color);
   if (colors.length > 0) {
-    const colorClauses = colors.map(
-      (c) => Prisma.sql`LOWER(color) LIKE ${`%${c.toLowerCase()}%`}`
-    );
+    const colorClauses = colors.map((c) => accentInsensitiveLike("color", c));
     conditions.push(Prisma.sql`(${Prisma.join(colorClauses, " OR ")})`);
   }
 
-  // sub_type: OR entre todos los subtipos
+  // sub_type: OR entre todos los subtipos (insensible a acentos → "decollete" = "décolleté")
   const subTypes = toArray(input.sub_type);
   if (subTypes.length > 0) {
     const subClauses = subTypes.map(
-      (s) => Prisma.sql`(LOWER(sub_type) LIKE ${`%${s.toLowerCase()}%`} OR LOWER(name) LIKE ${`%${s.toLowerCase()}%`})`
+      (s) => Prisma.sql`(${accentInsensitiveLike("sub_type", s)} OR ${accentInsensitiveLike("name", s)})`
     );
     conditions.push(Prisma.sql`(${Prisma.join(subClauses, " OR ")})`);
   }
 
   // material: OR entre todos los materiales (substring sobre el campo crudo → matchea
-  // también productos con composición no parseada = degradación elegante).
+  // también productos con composición no parseada = degradación elegante). Insensible a acentos.
   const materials = toArray(input.material);
   if (materials.length > 0) {
-    const matClauses = materials.map(
-      (m) => Prisma.sql`LOWER(materials) LIKE ${`%${m.toLowerCase()}%`}`
-    );
+    const matClauses = materials.map((m) => accentInsensitiveLike("materials", m));
     conditions.push(Prisma.sql`(${Prisma.join(matClauses, " OR ")})`);
   }
 
@@ -143,7 +152,7 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
         SELECT 1 FROM product_categories pc
         WHERE pc.client_id = products.client_id
           AND pc.base_product_id = products.base_product_id
-          AND LOWER(pc.category) LIKE ${`%${c.toLowerCase()}%`}
+          AND ${accentInsensitiveLike("pc.category", c)}
       )`
     );
     conditions.push(Prisma.sql`(${Prisma.join(catClauses, " OR ")})`);
@@ -370,9 +379,9 @@ export async function getCatalogOptions(
   ];
 
   if (filters.gender) conditions.push(Prisma.sql`gender = ${filters.gender}`);
-  if (filters.brand) conditions.push(Prisma.sql`LOWER(brand) = LOWER(${filters.brand})`);
-  if (filters.type) conditions.push(Prisma.sql`LOWER(type) = LOWER(${filters.type})`);
-  if (filters.subType) conditions.push(Prisma.sql`LOWER(sub_type) = LOWER(${filters.subType})`);
+  if (filters.brand) conditions.push(accentInsensitiveEq("brand", filters.brand));
+  if (filters.type) conditions.push(accentInsensitiveEq("type", filters.type));
+  if (filters.subType) conditions.push(accentInsensitiveEq("sub_type", filters.subType));
 
   const where = Prisma.join(conditions, " AND ");
 
@@ -409,9 +418,9 @@ async function getCategoryOptions(filters: CatalogOptionsFilters): Promise<Catal
       Prisma.sql`p.active = true`,
     ];
     if (filters.gender) productConds.push(Prisma.sql`p.gender = ${filters.gender}`);
-    if (filters.brand) productConds.push(Prisma.sql`LOWER(p.brand) = LOWER(${filters.brand})`);
-    if (filters.type) productConds.push(Prisma.sql`LOWER(p.type) = LOWER(${filters.type})`);
-    if (filters.subType) productConds.push(Prisma.sql`LOWER(p.sub_type) = LOWER(${filters.subType})`);
+    if (filters.brand) productConds.push(accentInsensitiveEq("p.brand", filters.brand));
+    if (filters.type) productConds.push(accentInsensitiveEq("p.type", filters.type));
+    if (filters.subType) productConds.push(accentInsensitiveEq("p.sub_type", filters.subType));
     const where = Prisma.join(productConds, " AND ");
 
     rows = await prisma.$queryRaw<{ value: string }[]>(
