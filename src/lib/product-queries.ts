@@ -22,11 +22,6 @@ function accentInsensitiveLike(column: string, term: string): Prisma.Sql {
   return Prisma.sql`unaccent(lower(${Prisma.raw(column)})) LIKE unaccent(lower(${`%${term.toLowerCase()}%`}))`;
 }
 
-/** Igualdad insensible a mayúsculas y acentos (para filtros exactos de catálogo). */
-function accentInsensitiveEq(column: string, value: string): Prisma.Sql {
-  return Prisma.sql`unaccent(lower(${Prisma.raw(column)})) = unaccent(lower(${value}))`;
-}
-
 /** Construye el patrón regex para una talla: "95C" o "95 C" → matchea "95 C (eu 80)" */
 function buildSizePattern(size: string): string | null {
   const normalized = size.trim().replace(/\s+/g, "").toUpperCase();
@@ -150,17 +145,24 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
   }
 
   // category: OR entre todas las categorías (join a product_categories vía base_product_id)
+  // category: OR entre todas. Los terminos se traducen antes a las grafias
+  // canonicas que existen en el catalogo; sin ese paso el filtro seria asimetrico
+  // (buscar "Boxers, shorties" encontraria las tres grafias, y "Boxers & shorties"
+  // solo la suya). Se buscan todas las clases: "Soldes" o una coleccion siguen
+  // siendo filtrables aunque no se listen como opciones.
   const categories = toArray(input.category);
   if (categories.length > 0) {
-    const catClauses = categories.map(
-      (c) => Prisma.sql`EXISTS (
-        SELECT 1 FROM product_categories pc
-        WHERE pc.client_id = products.client_id
-          AND pc.base_product_id = products.base_product_id
-          AND ${accentInsensitiveLike("pc.category", c)}
-      )`
+    const canonicals = await resolveCategoryCanonicals(categories);
+    conditions.push(
+      canonicals.length === 0
+        ? Prisma.sql`false` // ningun concepto del catalogo coincide con lo pedido
+        : Prisma.sql`EXISTS (
+            SELECT 1 FROM product_categories pc
+            WHERE pc.client_id = products.client_id
+              AND pc.base_product_id = products.base_product_id
+              AND COALESCE(pc.canonical, pc.category) IN (${Prisma.join(canonicals)})
+          )`
     );
-    conditions.push(Prisma.sql`(${Prisma.join(catClauses, " OR ")})`);
   }
 
   if (input.gender) {
@@ -262,6 +264,24 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
 }
 
 /**
+ * Traduce los terminos pedidos a las grafias canonicas del catalogo. Una consulta
+ * pequena y cacheable por Postgres que evita repetir el LIKE por cada producto, y
+ * que hace que cualquier grafia de un concepto encuentre el concepto entero.
+ */
+async function resolveCategoryCanonicals(terms: string[]): Promise<string[]> {
+  const clauses = terms.map(
+    (t) => Prisma.sql`(${accentInsensitiveLike("category", t)} OR ${accentInsensitiveLike("canonical", t)})`
+  );
+  const rows = await prisma.$queryRaw<{ canonical: string }[]>(Prisma.sql`
+    SELECT DISTINCT COALESCE(canonical, category) AS canonical
+    FROM product_categories
+    WHERE client_id = ${CLIENT_ID}
+      AND (${Prisma.join(clauses, " OR ")})
+  `);
+  return rows.map((r) => r.canonical).filter(Boolean);
+}
+
+/**
  * Carga categorías y composición estructurada de un conjunto de productos base.
  * Dos queries por búsqueda, no una por producto.
  */
@@ -274,10 +294,14 @@ async function loadEnrichment(baseIds: string[]): Promise<{
   if (baseIds.length === 0) return { catsByBase, compByBase };
 
   const [catRows, matRows] = await Promise.all([
+    // Solo taxonomia: las marcas ya van en `subtitle`, y las paginas de coleccion
+    // y de promo son ruido para el modelo. En grafia canonica y sin repetir, para
+    // que "Maillots de Bain" y "Maillots de bain" no salgan como dos categorias.
     prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
-      SELECT base_product_id, category
+      SELECT DISTINCT base_product_id, COALESCE(canonical, category) AS category
       FROM product_categories
       WHERE client_id = ${CLIENT_ID}
+        AND kind = 'taxonomia'
         AND base_product_id IN (${Prisma.join(baseIds)})
       ORDER BY category ASC
     `,
@@ -378,10 +402,13 @@ export async function getCatalogOptions(
     Prisma.sql`${Prisma.raw(column)} <> ''`,
   ];
 
+  // Se acota igual que en search_products (coincidencia parcial): con igualdad
+  // exacta, el mismo type que sirve para buscar ("boxer") no devolvia ninguna
+  // opcion, porque en el catalogo se llama "Boxer & Shorty".
   if (filters.gender) conditions.push(Prisma.sql`gender = ${filters.gender}`);
-  if (filters.brand) conditions.push(accentInsensitiveEq("brand", filters.brand));
-  if (filters.type) conditions.push(accentInsensitiveEq("type", filters.type));
-  if (filters.subType) conditions.push(accentInsensitiveEq("sub_type", filters.subType));
+  if (filters.brand) conditions.push(accentInsensitiveLike("brand", filters.brand));
+  if (filters.type) conditions.push(accentInsensitiveLike("type", filters.type));
+  if (filters.subType) conditions.push(accentInsensitiveLike("sub_type", filters.subType));
 
   const where = Prisma.join(conditions, " AND ");
 
@@ -398,6 +425,13 @@ export async function getCatalogOptions(
 }
 
 /**
+ * Clases de categoria que se ofrecen como valores buscables. Se dejan fuera las
+ * marcas (ya estan en el campo `brand`) y las 779 paginas de coleccion/color, que
+ * inflarian la lista sin aportar un eje de busqueda.
+ */
+const LISTABLE_CATEGORY_KINDS = ["taxonomia", "promo"];
+
+/**
  * Valores distintos de categoría (tabla product_categories). Si hay filtros,
  * solo considera categorías de productos activos que cumplan esos filtros.
  */
@@ -407,10 +441,11 @@ async function getCategoryOptions(filters: CatalogOptionsFilters): Promise<Catal
   let rows: { value: string }[];
   if (!hasFilters) {
     rows = await prisma.$queryRaw<{ value: string }[]>`
-      SELECT DISTINCT category AS value
+      SELECT DISTINCT COALESCE(canonical, category) AS value
       FROM product_categories
       WHERE client_id = ${CLIENT_ID}
-      ORDER BY category ASC
+        AND kind IN (${Prisma.join(LISTABLE_CATEGORY_KINDS)})
+      ORDER BY value ASC
     `;
   } else {
     const productConds: Prisma.Sql[] = [
@@ -418,19 +453,20 @@ async function getCategoryOptions(filters: CatalogOptionsFilters): Promise<Catal
       Prisma.sql`p.active = true`,
     ];
     if (filters.gender) productConds.push(Prisma.sql`p.gender = ${filters.gender}`);
-    if (filters.brand) productConds.push(accentInsensitiveEq("p.brand", filters.brand));
-    if (filters.type) productConds.push(accentInsensitiveEq("p.type", filters.type));
-    if (filters.subType) productConds.push(accentInsensitiveEq("p.sub_type", filters.subType));
+    if (filters.brand) productConds.push(accentInsensitiveLike("p.brand", filters.brand));
+    if (filters.type) productConds.push(accentInsensitiveLike("p.type", filters.type));
+    if (filters.subType) productConds.push(accentInsensitiveLike("p.sub_type", filters.subType));
     const where = Prisma.join(productConds, " AND ");
 
     rows = await prisma.$queryRaw<{ value: string }[]>(
-      Prisma.sql`SELECT DISTINCT pc.category AS value
+      Prisma.sql`SELECT DISTINCT COALESCE(pc.canonical, pc.category) AS value
                  FROM product_categories pc
                  JOIN products p
                    ON p.client_id = pc.client_id
                   AND p.base_product_id = pc.base_product_id
                  WHERE ${where}
-                 ORDER BY pc.category ASC`
+                   AND pc.kind IN (${Prisma.join(LISTABLE_CATEGORY_KINDS)})
+                 ORDER BY value ASC`
     );
   }
 

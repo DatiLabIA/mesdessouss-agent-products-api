@@ -274,7 +274,7 @@ export function createMcpServer(): McpServer {
       color: stringOrArray.optional().describe("Color(es) (ej: 'noir', ['rouge','blanc'])"),
       material: stringOrArray.optional().describe("Material(es)/fibra(s) (ej: 'coton', 'soie', 'dentelle'). Los resultados se ordenan por % real de la fibra"),
       sub_type: stringOrArray.optional().describe("Subtipo(s) o texto a buscar también en el nombre"),
-      category: stringOrArray.optional().describe("Categoría(s) del producto (ej: 'Slips', 'Maillots de bain', 'Soldes'). Usa get_catalog_options con field='category' para ver las disponibles"),
+      category: stringOrArray.optional().describe("Categoria(s) del producto. Cubre ejes que 'type' no tiene: talla grande ('Soutiens-Gorge Grandes Tailles'), universo ('Maillots de Bain', 'Lingerie de Nuit'), uso ('Invisibles', 'Sculptants', 'Lingerie Sport', 'Soutiens-gorge allaitement') y material ('Lingerie Coton', 'Laine et Soie'). Tambien acepta temporada ('Saint-Valentin', 'Soldes') y nombres de coleccion o marca. Usa get_catalog_options con field='category' para ver las disponibles"),
       min_material_pct: z.number().min(0).max(100).optional().describe("% mínimo de la fibra pedida en 'material' (cuerpo o forro). Requiere 'material'. Ej: 30 = solo prendas con ≥30% de esa fibra"),
       min_price: z.number().optional().describe("Precio mínimo"),
       max_price: z.number().optional().describe("Precio máximo"),
@@ -305,7 +305,7 @@ export function createMcpServer(): McpServer {
   // ─── get_catalog_options ─────────────────────────────────────────────────
   server.tool(
     "get_catalog_options",
-    `Devuelve los valores distintos disponibles de un campo del catálogo (solo lectura). Útil para descubrir qué tipos, marcas, colores, etc. existen antes de buscar. Campos válidos: ${CATALOG_FIELDS.join(", ")}. Se puede acotar con filtros opcionales.`,
+    `Devuelve los valores distintos disponibles de un campo del catalogo (solo lectura). Util para descubrir que tipos, marcas, colores o categorias existen antes de buscar. Campos validos: ${CATALOG_FIELDS.join(", ")}. Con field='category' devuelve los ejes de busqueda (taxonomia y temporada) ya unificados: una sola entrada por concepto, sin nombres de coleccion ni de marca. Se puede acotar con filtros opcionales.`,
     {
       field: z.enum(CATALOG_FIELDS).describe("Campo del que se quieren los valores distintos (ej: 'type', 'brand', 'color')"),
       filters: z

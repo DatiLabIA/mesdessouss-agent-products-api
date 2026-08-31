@@ -133,7 +133,7 @@ núcleo + `attributes` (se pinta) + `details` (nunca se pinta; contexto para el 
           { "fiber": "polyamide",  "pct": 89, "zone": "corps" },
           { "fiber": "elasthanne", "pct": 11, "zone": "corps" }
         ],
-        "categories": ["Aubade", "Soutiens-Gorge Corbeille", "..."],
+        "categories": ["Lingerie Femme", "Soutiens-Gorge Corbeille", "Soutiens-Gorge Grandes Tailles"],
         "description": "La nouvelle collection Danse des Sens..."
       }
     }
@@ -181,7 +181,7 @@ ruido en un caption de WhatsApp. El detalle completo viaja en `details`.
 | `type` / `subType` | Taxonomía interna del catálogo |
 | `rawMaterial` | Composición cruda tal y como llega de Prestashop |
 | `composition` | Composición estructurada: `[{ fiber, pct, zone }]`, `zone` = `corps` \| `doublure` |
-| `categories` | Categorías del producto |
+| `categories` | Ejes de taxonomia del producto (talla grande, universo, uso, material), unificados y sin nombres de marca ni de coleccion |
 | `description` | Descripción larga (hasta 1500 caracteres) |
 
 > **Tip**: `filters_applied` le dice a Claude exactamente qué filtros se aplicaron, y puede

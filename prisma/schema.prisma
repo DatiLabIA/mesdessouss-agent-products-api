@@ -75,11 +75,17 @@ model ProductCategory {
   clientId      String   @map("client_id") @db.VarChar(50)
   baseProductId String   @map("base_product_id") @db.VarChar(50)
   category      String   @db.VarChar(255)
+  /// taxonomia | marca | coleccion | promo — el feed mezcla las cuatro.
+  kind          String   @default("taxonomia") @db.VarChar(20)
+  /// Grafía canónica del concepto: agrupa "Boxers, shorties" y "Boxers & shorties".
+  canonical     String?  @db.VarChar(255)
   syncedAt      DateTime @default(now()) @map("synced_at")
 
   @@unique([clientId, baseProductId, category])
   @@index([clientId, category])
   @@index([clientId, baseProductId])
+  @@index([clientId, kind])
+  @@index([clientId, canonical])
   @@map("product_categories")
 }
 
