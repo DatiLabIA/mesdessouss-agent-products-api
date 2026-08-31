@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { canonicalFiber } from "./material-parser";
-import type { ProductSearchInput, ProductSearchResponse, ProductResult, MaterialComposition } from "../types";
+import { toCatalogProduct } from "./product-presenter";
+import type { ProductSearchInput, ProductSearchResponse, CatalogProduct, MaterialComposition } from "../types";
 
 const CLIENT_ID = "mesdessous";
 
@@ -77,6 +78,10 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
     Prisma.sql`client_id = ${CLIENT_ID}`,
     Prisma.sql`active = true`,
     Prisma.sql`(image_url LIKE '%.jpg' OR image_url LIKE '%.png' OR image_url LIKE '%.webp')`,
+    // La convención exige enlace y precio en el núcleo: sin ellos no hay ficha que
+    // pintar. Se descartan en el WHERE (no tras el LIMIT) para no devolver de menos.
+    Prisma.sql`product_url IS NOT NULL AND product_url <> ''`,
+    Prisma.sql`price IS NOT NULL`,
   ];
 
   // type: OR entre todos los valores (insensible a acentos)
@@ -226,69 +231,20 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
         `;
   }
 
-  const products: ProductResult[] = rows.map((row) => ({
-    id: row.product_id,
-    base_product_id: row.base_product_id,
-    name: row.name,
-    brand: row.brand,
-    type: row.type,
-    sub_type: row.sub_type,
-    price: row.price !== null ? parseFloat(row.price) : null,
-    old_price: row.old_price !== null ? parseFloat(row.old_price) : null,
-    has_discount: row.has_discount,
-    discount_percentage: row.discount_pct,
-    size: row.sizes ?? null,
-    color: row.color ?? null,
-    material: row.materials ?? null,
-    quantity: row.quantity ?? 0,
-    in_stock: (row.quantity ?? 0) > 0,
-    url: row.product_url,
-    image_url: row.image_url,
-    description: row.description,
-    categories: [],
-    composition: [],
-  }));
+  // Categorías y composición estructurada de los productos devueltos (join por
+  // base_product_id). Se cargan antes de presentar: ambas alimentan `details`, y la
+  // composición decide además la etiqueta "Matière" de la ficha.
+  const { catsByBase, compByBase } = await loadEnrichment([...new Set(rows.map((r) => r.base_product_id))]);
 
-  // Adjuntar categorías y composición estructurada de cada producto (join por base_product_id).
-  if (products.length > 0) {
-    const baseIds = [...new Set(rows.map((r) => r.base_product_id))];
-
-    const [catRows, matRows] = await Promise.all([
-      prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
-        SELECT base_product_id, category
-        FROM product_categories
-        WHERE client_id = ${CLIENT_ID}
-          AND base_product_id IN (${Prisma.join(baseIds)})
-        ORDER BY category ASC
-      `,
-      prisma.$queryRaw<{ base_product_id: string; fiber: string; pct: number; zone: string }[]>`
-        SELECT base_product_id, fiber, pct, zone
-        FROM product_materials
-        WHERE client_id = ${CLIENT_ID}
-          AND base_product_id IN (${Prisma.join(baseIds)})
-        ORDER BY zone ASC, pct DESC
-      `,
-    ]);
-
-    const catsByBase = new Map<string, string[]>();
-    for (const cr of catRows) {
-      const list = catsByBase.get(cr.base_product_id) ?? [];
-      list.push(cr.category);
-      catsByBase.set(cr.base_product_id, list);
-    }
-
-    const compByBase = new Map<string, MaterialComposition[]>();
-    for (const mr of matRows) {
-      const list = compByBase.get(mr.base_product_id) ?? [];
-      list.push({ fiber: mr.fiber, pct: mr.pct, zone: mr.zone });
-      compByBase.set(mr.base_product_id, list);
-    }
-
-    for (const p of products) {
-      p.categories = catsByBase.get(p.base_product_id) ?? [];
-      p.composition = compByBase.get(p.base_product_id) ?? [];
-    }
-  }
+  const products: CatalogProduct[] = rows
+    .map((row) =>
+      toCatalogProduct(
+        row,
+        catsByBase.get(row.base_product_id) ?? [],
+        compByBase.get(row.base_product_id) ?? []
+      )
+    )
+    .filter((p): p is CatalogProduct => p !== null);
 
   const response: ProductSearchResponse = {
     products,
@@ -303,6 +259,50 @@ export async function searchProducts(input: ProductSearchInput): Promise<Product
   }
 
   return response;
+}
+
+/**
+ * Carga categorías y composición estructurada de un conjunto de productos base.
+ * Dos queries por búsqueda, no una por producto.
+ */
+async function loadEnrichment(baseIds: string[]): Promise<{
+  catsByBase: Map<string, string[]>;
+  compByBase: Map<string, MaterialComposition[]>;
+}> {
+  const catsByBase = new Map<string, string[]>();
+  const compByBase = new Map<string, MaterialComposition[]>();
+  if (baseIds.length === 0) return { catsByBase, compByBase };
+
+  const [catRows, matRows] = await Promise.all([
+    prisma.$queryRaw<{ base_product_id: string; category: string }[]>`
+      SELECT base_product_id, category
+      FROM product_categories
+      WHERE client_id = ${CLIENT_ID}
+        AND base_product_id IN (${Prisma.join(baseIds)})
+      ORDER BY category ASC
+    `,
+    prisma.$queryRaw<{ base_product_id: string; fiber: string; pct: number; zone: string }[]>`
+      SELECT base_product_id, fiber, pct, zone
+      FROM product_materials
+      WHERE client_id = ${CLIENT_ID}
+        AND base_product_id IN (${Prisma.join(baseIds)})
+      ORDER BY zone ASC, pct DESC
+    `,
+  ]);
+
+  for (const cr of catRows) {
+    const list = catsByBase.get(cr.base_product_id) ?? [];
+    list.push(cr.category);
+    catsByBase.set(cr.base_product_id, list);
+  }
+
+  for (const mr of matRows) {
+    const list = compByBase.get(mr.base_product_id) ?? [];
+    list.push({ fiber: mr.fiber, pct: mr.pct, zone: mr.zone });
+    compByBase.set(mr.base_product_id, list);
+  }
+
+  return { catsByBase, compByBase };
 }
 
 // ─── Opciones de catálogo (valores distintos por campo) ────────────────────

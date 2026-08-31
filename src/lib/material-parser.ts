@@ -63,7 +63,8 @@ const FIBER_ALT = Object.keys(FIBER_SYNONYMS)
 // Marcadores de zona: a partir de aquí, las fibras son forro/doublure.
 const LINING_RE = /\b(doublure|fond|forro|lining|face interne)\b/;
 
-function stripAccents(s: string): string {
+/** Minúsculas comparables: quita los diacríticos (usado también por el presentador). */
+export function stripAccents(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 

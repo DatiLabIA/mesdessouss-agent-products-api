@@ -28,32 +28,54 @@ export interface StorePoliciesInput {
   topic: string;
 }
 
-export interface ProductResult {
+/**
+ * Producto en el formato de la convención de microservicios
+ * (docs/convencion-productos-microservicios.md). Tres cajones: núcleo (siempre se
+ * pinta), `attributes` (se pinta, ordenado y recortable) y `details` (nunca se
+ * pinta: contexto para el modelo).
+ */
+export interface CatalogProduct {
   id: string;
-  base_product_id: string;
-  name: string;
-  brand: string | null;
-  type: string | null;
-  sub_type: string | null;
-  price: number | null;
-  old_price: number | null;
-  has_discount: boolean;
-  discount_percentage: number;
-  size: string | null;
-  color: string | null;
-  material: string | null;
-  quantity: number;
-  in_stock: boolean;
-  url: string | null;
-  image_url: string | null;
-  description: string | null;
-  categories: string[];
-  /** Composición estructurada (fibra, %, zona). Vacío si el material no se pudo parsear. */
-  composition: MaterialComposition[];
+  title: string;
+  /** Marca o línea. Va bajo el título. */
+  subtitle?: string;
+  /** URL de UNA imagen, no un array. */
+  image: string;
+  url: string;
+  /** Número crudo, sin símbolos ni separadores: lo formatea quien lo pinta. */
+  price: number;
+  /** Código ISO de moneda (EUR). */
+  currency: string;
+  /** Precio anterior. Solo viaja si es mayor que `price` → se pinta el descuento. */
+  oldPrice?: number;
+  /** `false` oculta el producto en el render. */
+  available: boolean;
+  /** Ordenados por importancia, con etiqueta y valor ya escritos. */
+  attributes: ProductAttribute[];
+  details: ProductDetails;
+}
+
+/** Par etiqueta/valor que se pinta tal cual en la ficha. */
+export interface ProductAttribute {
+  label: string;
+  value: string;
+}
+
+/** Lo que no se pinta pero el modelo necesita para responder preguntas. */
+export interface ProductDetails {
+  baseProductId: string;
+  stock: number;
+  type?: string;
+  subType?: string;
+  /** Composición cruda tal y como llega de Prestashop. */
+  rawMaterial?: string;
+  composition?: MaterialComposition[];
+  categories?: string[];
+  description?: string;
 }
 
 export interface ProductSearchResponse {
-  products: ProductResult[];
+  products: CatalogProduct[];
   total: number;
   filters_applied: ProductSearchInput;
   suggestion?: string;

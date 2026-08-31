@@ -102,34 +102,90 @@ Las tres tools que Julie (el agente de IA) usará:
 
 #### Response body
 
+Sigue la [convención de productos para microservicios](docs/convencion-productos-microservicios.md):
+núcleo + `attributes` (se pinta) + `details` (nunca se pinta; contexto para el modelo).
+
 ```json
 {
   "products": [
     {
-      "id": "MD-1234",
-      "name": "Culotte taille haute dentelle - Noir",
-      "brand": "Marie Jo",
-      "type": "culotte",
-      "price": 24.90,
-      "old_price": 34.90,
-      "has_discount": true,
-      "discount_percentage": 28,
-      "sizes_available": ["XS", "S", "M", "L"],
-      "colors_available": ["noir", "blanc", "nude"],
-      "url": "https://mesdessous.fr/products/MD-1234",
-      "image_url": "https://mesdessous.fr/images/MD-1234.jpg",
-      "description": "Culotte taille haute en dentelle, confort optimal"
+      "id": "49452_1300806",
+      "title": "Soutien-gorge corbeille Aubade Danse des Sens (Pink Pulsion)",
+      "subtitle": "Aubade",
+      "image": "https://www.mesdessous.fr/137653-large_default/....jpg",
+      "url": "https://www.mesdessous.fr/.../49452-1300806-....html",
+      "price": 50,
+      "currency": "EUR",
+      "oldPrice": 100,
+      "available": true,
+      "attributes": [
+        { "label": "Taille",  "value": "85 C (eu 70)" },
+        { "label": "Couleur", "value": "Rose" },
+        { "label": "Matière", "value": "Dentelle" }
+      ],
+      "details": {
+        "baseProductId": "49452",
+        "stock": 5,
+        "type": "Soutien-gorge",
+        "subType": "Soutien-Gorge Corbeille",
+        "rawMaterial": "DENTELLE: 89% Polyamide 11% Elasthanne",
+        "composition": [
+          { "fiber": "polyamide",  "pct": 89, "zone": "corps" },
+          { "fiber": "elasthanne", "pct": 11, "zone": "corps" }
+        ],
+        "categories": ["Aubade", "Soutiens-Gorge Corbeille", "..."],
+        "description": "La nouvelle collection Danse des Sens..."
+      }
     }
   ],
   "total": 1,
   "filters_applied": {
-    "type": "culotte",
-    "size": "XXS"
+    "type": "soutien-gorge",
+    "material": "dentelle"
   }
 }
 ```
 
-> **Tip**: Incluir `filters_applied` ayuda a Claude a saber exactamente qué filtros se usaron y puede informar al usuario si no hay resultados para su talla exacta.
+**Núcleo** — se pinta siempre:
+
+| Campo | Obligatorio | Qué es |
+|---|---|---|
+| `id` | ✅ | Referencia de la variación (`base_variación`) |
+| `title` | ✅ | Nombre del producto |
+| `image` | ✅ | URL de **una** imagen, no un array |
+| `url` | ✅ | Ficha de esa variación concreta |
+| `price` | ✅ | **Número** en crudo, sin símbolo ni separadores |
+| `currency` | ✅ | Siempre `EUR` |
+| `subtitle` | No | Marca. Va bajo el título |
+| `oldPrice` | No | Solo viaja si es **mayor** que `price` → se pinta el descuento |
+| `available` | No | `false` (sin stock) oculta el producto en el render |
+
+> Un producto sin imagen, sin enlace o sin precio no se devuelve: no hay ficha que pintar.
+
+**`attributes`** — lista ordenada por importancia, con la etiqueta y el valor ya escritos.
+Para mesdessous son **talla, color y material**, en ese orden; DatiHub los pinta tal cual y
+recorta por el final si no caben. Un atributo sin valor no se manda (un producto sin
+composición registrada no lleva `Matière`).
+
+`Matière` es la etiqueta corta del tejido principal (`Dentelle`, `Microfibre`, `Coton`...),
+no la composición entera: `"DENTELLE: 89% Polyamide 11% Elasthanne"` son 40 caracteres de
+ruido en un caption de WhatsApp. El detalle completo viaja en `details`.
+
+**`details`** — **nunca se pinta**. Es lo que el modelo necesita para conversar
+("¿es de encaje?", "¿queda stock?", "¿lo tenéis en otra talla?"):
+
+| Campo | Qué es |
+|---|---|
+| `baseProductId` | Producto base que agrupa las variaciones |
+| `stock` | Unidades de esa variación |
+| `type` / `subType` | Taxonomía interna del catálogo |
+| `rawMaterial` | Composición cruda tal y como llega de Prestashop |
+| `composition` | Composición estructurada: `[{ fiber, pct, zone }]`, `zone` = `corps` \| `doublure` |
+| `categories` | Categorías del producto |
+| `description` | Descripción larga (hasta 1500 caracteres) |
+
+> **Tip**: `filters_applied` le dice a Claude exactamente qué filtros se aplicaron, y puede
+> avisar al cliente si no hay resultados para su talla exacta.
 
 #### Caso sin resultados
 
@@ -138,7 +194,7 @@ Las tres tools que Julie (el agente de IA) usará:
   "products": [],
   "total": 0,
   "filters_applied": { "type": "culotte", "size": "XXS" },
-  "suggestion": "No encontramos culottes en talla XXS. Disponibles en tallas XS, S, M, L."
+  "suggestion": "No se encontraron culotte en talla XXS. Intenta con otros filtros."
 }
 ```
 
