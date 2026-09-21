@@ -354,7 +354,49 @@ Verificado sobre pedidos reales:
 - [x] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
   Ruta: delegada (writer). `pnpm build` y `pnpm test` en verde (150/150; 120
   preexistentes + 30 nuevos). Sin ejecutar nada contra la base.
-- [ ] **T11** — Handler Express + ruta.
+- [x] **T11** — Handler Express + ruta `POST /order_lookup`. Ruta: delegada (writer)
+  + corrección del padre.
+
+### Un 500 que debía ser 503
+
+Los tests con `fetch` y Prisma dobles daban 163/163. Al ejercitar el handler con sus
+**dependencias reales** —el camino de import dinámico que ningún test ejecutaba— el
+resultado fue **HTTP 500**, no el 503 que exige el criterio.
+
+Causa: `loadActiveRuleSet` lanza un error de conexión de Prisma, que no es
+`RuleSetNotFoundError` ni `RuleSetValidationError`. Enumerar clases de error dejaba
+escapar justamente el fallo más probable, y reportaba un problema de infraestructura
+como si fuera un bug de nuestra lógica.
+
+Corregido: **cualquier** fallo al obtener las reglas responde 503. Sin reglas no se
+puede contestar, y la causa nunca es del cliente que pregunta — base inalcanzable,
+migración sin aplicar o pool agotado son el mismo caso operativo. El 500 se reserva
+para lo que de verdad es inesperado, con un test propio que lo cubre (un error
+funcional de la API en la consolidación) verificando que no filtra detalle interno.
+
+Verificado contra el entorno real, con la base caída:
+
+| Petición | HTTP | Cuerpo |
+|---|---|---|
+| Sin `email` | 400 | campos obligatorios |
+| Email ajeno | 200 | `{found:false, identity_verified:false, outcome:"IDENTITY_NOT_VERIFIED"}` y nada más |
+| Completa, sin reglas activas | 503 | reglas no configuradas |
+
+## Estado final de la fase 2
+
+Las 11 tareas cerradas. `pnpm build` en verde, **164 tests** en verde.
+
+### Pendiente, y no depende de código
+
+1. **Aplicar la migración**: `pnpm migrate:deploy` aplica las dos pendientes
+   (`add_category_kind` y `add_rules_engine`). El host remoto dio P1001 en los últimos
+   intentos: comprobar que responde antes.
+2. **Sembrar y activar**: `pnpm seed:rules` crea el RuleSet v1 en `draft`. Activarlo es
+   deliberado, por la tool MCP `activate_rule_set` y previo `simulate_rules`.
+3. **Los 8 `body` de plantilla** siguen vacíos: los textos están en
+   `scenario_lia.numbers`, hoja Feuil2, que no está en el repositorio.
+4. **Confirmar con el cliente** la desviación del §4 fila 13 documentada en T8, y los
+   plazos reales de las tres submarcas sembradas por aproximación.
 
 ### T10 — decisiones y hallazgos
 

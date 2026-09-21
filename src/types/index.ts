@@ -136,3 +136,125 @@ export interface UnverifiedOrderIdentity {
 
 /** Resultado discriminado de la validación de identidad de un pedido. */
 export type OrderIdentityResult = VerifiedOrderIdentity | UnverifiedOrderIdentity;
+
+// ─── Handler HTTP: POST /order_lookup (T11) ────────────────────────────────
+
+/** Cuerpo de entrada de `POST /order_lookup`. */
+export interface OrderLookupRequestBody {
+  reference: string;
+  email: string;
+}
+
+/**
+ * Negativo uniforme de identidad: una sola forma para "referencia inexistente"
+ * y "email ajeno" (RGPD). Nunca lleva la referencia, el email ni ningún dato
+ * del pedido.
+ */
+export interface OrderLookupIdentityNotVerifiedResponse {
+  found: false;
+  identity_verified: false;
+  outcome: "IDENTITY_NOT_VERIFIED";
+}
+
+/** Más de un pedido comparte la referencia: se escala, nunca se elige uno al azar. */
+export interface OrderLookupAmbiguousResponse {
+  found: false;
+  identity_verified: false;
+  outcome: "AMBIGUOUS_REFERENCE";
+  must_escalate: true;
+  escalate_reason: string;
+}
+
+export interface OrderLookupOrderView {
+  id: number;
+  reference: string;
+  dateAdd: Date;
+  status: { id: number; name: string };
+  /** Grupo del árbol de decisión (§2.1): `A|B|C|D|R`. */
+  group: string;
+  totals: { totalPaid: number; shippingPaid: number };
+  currency: string;
+}
+
+/** Nunca lleva campos sensibles (`passwd`, `secure_key`, etc.): construido con campos explícitos. */
+export interface OrderLookupCustomerView {
+  firstname: string;
+  lastname: string;
+  email: string;
+  idLang: number;
+}
+
+export interface OrderLookupLineView {
+  name: string;
+  brand: string | null;
+  quantity: number;
+  stockQuantity: number | null;
+  covered: boolean;
+}
+
+export interface OrderLookupShippingView {
+  carrierName: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  shippedWithoutTracking: boolean;
+  shippedAt: Date | null;
+}
+
+export interface OrderLookupRefundView {
+  amount: number;
+  type: "VOUCHER" | "MONEY";
+  voucherExpiresAt: Date | null;
+  processedDate: Date;
+}
+
+export interface OrderLookupReturnView {
+  dataAvailable: false;
+  reason: string;
+  completed: boolean;
+}
+
+export interface OrderLookupConversationView {
+  threadId: number | null;
+  lastMessage: string | null;
+  lastMessageDate: Date | null;
+  awaitingShopReply: boolean;
+}
+
+export interface OrderLookupGuidanceFactView {
+  key: string;
+  value: string;
+}
+
+/** El bloque que Lia usa para redactar la respuesta al cliente. */
+export interface OrderLookupGuidanceView {
+  situation: string;
+  can_answer: boolean;
+  must_escalate: boolean;
+  escalate_reason: string | null;
+  reply_language: string;
+  facts_to_convey: OrderLookupGuidanceFactView[];
+  must_not_claim: string[];
+  reference_template: string | null;
+  template_text: string | null;
+  missing_facts: string[];
+}
+
+/** Camino feliz: identidad verificada y regla resuelta. */
+export interface OrderLookupSuccessResponse {
+  found: true;
+  identity_verified: true;
+  order: OrderLookupOrderView;
+  customer: OrderLookupCustomerView;
+  lines: OrderLookupLineView[];
+  shipping: OrderLookupShippingView;
+  refund: OrderLookupRefundView | null;
+  return: OrderLookupReturnView;
+  conversation: OrderLookupConversationView;
+  guidance: OrderLookupGuidanceView;
+}
+
+/** Cuerpo de salida de `POST /order_lookup`, discriminado por `found`/`outcome`. */
+export type OrderLookupResponseBody =
+  | OrderLookupSuccessResponse
+  | OrderLookupIdentityNotVerifiedResponse
+  | OrderLookupAmbiguousResponse;
