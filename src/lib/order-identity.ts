@@ -158,32 +158,37 @@ export async function verifyOrderIdentity(input: OrderIdentityInput): Promise<Or
     }),
   ]);
 
-  if (customerResult.status === "rejected" || threadsResult.status === "rejected") {
-    const rejections = [customerResult, threadsResult].filter(
-      (r): r is PromiseRejectedResult => r.status === "rejected"
-    );
-
-    // Fallo transitorio leyendo cliente u hilos: nunca se disfraza de
-    // "identidad no verificada", porque le negaría el pedido a un cliente legítimo.
-    if (rejections.some((r) => r.reason instanceof PrestashopUnavailableError)) {
-      return SERVICE_UNAVAILABLE;
-    }
-
-    // Anomalía de datos (ej: el cliente del pedido ya no existe): se trata
+  // La cuenta del cliente es decisiva: sin ella no hay identidad contra la que comparar.
+  if (customerResult.status === "rejected") {
+    // Un fallo transitorio (incluido un timeout) nunca se disfraza de "identidad no
+    // verificada": eso le negaría el pedido a un cliente legítimo.
+    if (customerResult.reason instanceof PrestashopUnavailableError) return SERVICE_UNAVAILABLE;
+    // Anomalía de datos, por ejemplo que el cliente del pedido ya no exista: se trata
     // igual que "no coincide", sin distinguir el motivo.
-    if (rejections.every((r) => r.reason instanceof PrestashopNotFoundError)) {
-      return IDENTITY_NOT_VERIFIED;
-    }
-
+    if (customerResult.reason instanceof PrestashopNotFoundError) return IDENTITY_NOT_VERIFIED;
     // Cualquier otro error no es un resultado de negocio: se deja propagar.
-    throw rejections[0].reason;
+    throw customerResult.reason;
   }
 
   const customer = customerResult.value;
-  const threads = threadsResult.value;
+  const accountEmail = normalizeEmail(customer.email);
+
+  // Los hilos SOLO amplían el conjunto válido; nunca lo deciden. Si el recurso no
+  // estuviera expuesto por los permisos del webservice, su 404 no puede rechazar al
+  // dueño cuyo email de cuenta ya coincide: eso negaría el pedido a todos los clientes
+  // legítimos, y el llamador lo leería como un veredicto de negocio en vez de un fallo.
+  let threads: PrestashopCustomerThreadRecord[] = [];
+  if (threadsResult.status === "fulfilled") {
+    threads = threadsResult.value;
+  } else if (threadsResult.reason instanceof PrestashopUnavailableError) {
+    // Transitorio: solo es decisivo si el email de cuenta no zanja ya la cuestión.
+    if (accountEmail !== requestedEmail) return SERVICE_UNAVAILABLE;
+  } else if (!(threadsResult.reason instanceof PrestashopNotFoundError)) {
+    throw threadsResult.reason;
+  }
 
   const validEmails = new Set<string>([
-    normalizeEmail(customer.email),
+    accountEmail,
     ...threads.map((thread) => normalizeEmail(thread.email)),
   ]);
 

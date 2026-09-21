@@ -41,8 +41,10 @@ const THREADS_BODY = JSON.stringify({
 
 interface StubRoute {
   when: RegExp;
-  body: string;
+  body?: string;
   status?: number;
+  /** Simula el `TimeoutError` que lanza `fetch` cuando `AbortSignal.timeout` aborta. */
+  timeout?: boolean;
 }
 
 const realFetch = globalThis.fetch;
@@ -55,7 +57,12 @@ function stubFetch(routes: StubRoute[]): void {
     const url = String(input);
     const route = routes.find((r) => r.when.test(url));
     assert.ok(route, `El test no tiene stub para la URL solicitada: ${url}`);
-    return new Response(route.body, { status: route.status ?? 200 });
+    if (route.timeout) {
+      const err = new Error("timeout simulado");
+      err.name = "TimeoutError";
+      throw err;
+    }
+    return new Response(route.body ?? "", { status: route.status ?? 200 });
   }) as typeof fetch;
 }
 
@@ -135,6 +142,55 @@ describe("verifyOrderIdentity", () => {
       { when: /\/customer_threads\?/, body: THREADS_BODY },
     ]);
     const r = await verifyOrderIdentity({ reference: REFERENCE, email: ACCOUNT_EMAIL });
+    assert.equal(r.outcome, "SERVICE_UNAVAILABLE");
+  });
+
+  test("si los hilos devuelven 404, el email de cuenta sigue verificando", async () => {
+    // El recurso customer_threads puede no estar expuesto por los permisos del
+    // webservice. Ese 404 no puede rechazar al dueño cuyo email de cuenta coincide.
+    stubFetch([
+      { when: /\/orders\?/, body: ORDERS_BODY },
+      { when: /\/customers\//, body: CUSTOMER_BODY },
+      { when: /\/customer_threads\?/, status: 404 },
+    ]);
+    const r = await verifyOrderIdentity({ reference: REFERENCE, email: ACCOUNT_EMAIL });
+    assert.equal(r.outcome, "VERIFIED");
+  });
+
+  test("si los hilos devuelven 404, un email ajeno sigue sin verificar", async () => {
+    stubFetch([
+      { when: /\/orders\?/, body: ORDERS_BODY },
+      { when: /\/customers\//, body: CUSTOMER_BODY },
+      { when: /\/customer_threads\?/, status: 404 },
+    ]);
+    const r = await verifyOrderIdentity({ reference: REFERENCE, email: "intruso@example.com" });
+    assert.equal(r.outcome, "IDENTITY_NOT_VERIFIED");
+    assert.deepEqual(Object.keys(r), ["outcome"]);
+  });
+
+  test("un timeout se resuelve a servicio no disponible, no escapa como excepción", async () => {
+    stubFetch([{ when: /\/orders\?/, timeout: true }]);
+    const r = await verifyOrderIdentity({ reference: REFERENCE, email: ACCOUNT_EMAIL });
+    assert.equal(r.outcome, "SERVICE_UNAVAILABLE");
+  });
+
+  test("un timeout en los hilos no impide verificar por el email de cuenta", async () => {
+    stubFetch([
+      { when: /\/orders\?/, body: ORDERS_BODY },
+      { when: /\/customers\//, body: CUSTOMER_BODY },
+      { when: /\/customer_threads\?/, timeout: true },
+    ]);
+    const r = await verifyOrderIdentity({ reference: REFERENCE, email: ACCOUNT_EMAIL });
+    assert.equal(r.outcome, "VERIFIED");
+  });
+
+  test("un timeout en los hilos sí es decisivo si el email solo podía estar ahí", async () => {
+    stubFetch([
+      { when: /\/orders\?/, body: ORDERS_BODY },
+      { when: /\/customers\//, body: CUSTOMER_BODY },
+      { when: /\/customer_threads\?/, timeout: true },
+    ]);
+    const r = await verifyOrderIdentity({ reference: REFERENCE, email: THREAD_EMAIL });
     assert.equal(r.outcome, "SERVICE_UNAVAILABLE");
   });
 

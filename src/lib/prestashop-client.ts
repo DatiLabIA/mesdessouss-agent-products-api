@@ -93,8 +93,17 @@ export class PrestashopUnavailableError extends Error {
   }
 }
 
-/** El request superó el tiempo máximo de espera. */
-export class PrestashopTimeoutError extends Error {
+/**
+ * El request superó el tiempo máximo de espera.
+ *
+ * Extiende `PrestashopUnavailableError` a propósito. Un timeout es un fallo
+ * transitorio más, y como clase hermana se escapaba de todo mapeo a resultado de
+ * negocio: tras agotar los reintentos salía como excepción en vez de resolverse
+ * a "servicio no disponible", rompiendo el contrato de retorno justo donde la
+ * invariante de "un fallo transitorio nunca niega la identidad" debe sostenerse.
+ * Siendo subclase, cualquier `instanceof PrestashopUnavailableError` ya lo cubre.
+ */
+export class PrestashopTimeoutError extends PrestashopUnavailableError {
   constructor(message: string) {
     super(message);
     this.name = "PrestashopTimeoutError";
@@ -102,7 +111,7 @@ export class PrestashopTimeoutError extends Error {
 }
 
 function isRetryableError(err: unknown): boolean {
-  return err instanceof PrestashopUnavailableError || err instanceof PrestashopTimeoutError;
+  return err instanceof PrestashopUnavailableError;
 }
 
 function sleep(ms: number): Promise<void> {

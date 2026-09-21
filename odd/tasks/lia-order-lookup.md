@@ -136,6 +136,28 @@ Añadidos 9 tests con el runner nativo de Node y `fetch` stubeado, sin dependenc
 Los tests fijan además la regresión de `display=[...]`: el stub de `customers` devuelve
 la forma de array real, así que si alguien revierte `extractSingle` el test falla.
 
+### Segunda ronda de revisión (lineage `review-4d1861ed215a880a`)
+
+Dos hallazgos CRITICAL más, ambos aceptados y corregidos:
+
+**`R3-threads-notfound-denies-legit-customer`** — si solo fallaba la lectura de hilos
+con 404, `rejections.every(...)` era trivialmente cierto con un único rechazo y se
+devolvía `IDENTITY_NOT_VERIFIED`, descartando el email de cuenta ya resuelto que sí
+coincidía. Mismo patrón de fallo silencioso que el bug de `display`: si
+`customer_threads` no estuviera expuesto por permisos del webservice, todo cliente
+legítimo quedaría rechazado y el llamador lo leería como veredicto de negocio.
+Corregido con un triaje asimétrico: la cuenta es decisiva, los hilos solo amplían el
+conjunto válido y su 404 degrada en silencio.
+
+**`R3-timeout-escapes-outcome-contract`** — `PrestashopTimeoutError` era clase hermana
+de `PrestashopUnavailableError`, así que tras agotar los reintentos escapaba como
+excepción en vez de resolverse a `SERVICE_UNAVAILABLE`, rompiendo el contrato de
+retorno justo donde la invariante de "un transitorio nunca niega la identidad" debía
+sostenerse. Ahora es subclase, y todo `instanceof PrestashopUnavailableError` lo cubre.
+
+Cobertura ampliada de 9 a 14 tests, incluidos el 404 en hilos y el timeout real
+(simulando el `TimeoutError` que lanza `fetch` al abortar).
+
 ## Progreso
 
 T1–T4 completadas y verificadas. Los 5 criterios de aceptación se cumplen.
