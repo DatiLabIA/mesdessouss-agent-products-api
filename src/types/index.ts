@@ -80,3 +80,59 @@ export interface ProductSearchResponse {
   filters_applied: ProductSearchInput;
   suggestion?: string;
 }
+
+// ─── Validación de identidad de pedidos (lia-order-lookup) ────────────────
+
+/**
+ * Entrada de la validación de identidad. La referencia es el filtro de
+ * búsqueda; el email solo valida que quien pregunta es el dueño del pedido.
+ */
+export interface OrderIdentityInput {
+  reference: string;
+  email: string;
+}
+
+/** Resultado posible de `verifyOrderIdentity`, discriminado por `outcome`. */
+export type OrderIdentityOutcome =
+  | "VERIFIED"
+  | "IDENTITY_NOT_VERIFIED"
+  | "AMBIGUOUS_REFERENCE"
+  | "SERVICE_UNAVAILABLE";
+
+/** Datos mínimos del pedido que viajan una vez verificada la identidad. */
+export interface VerifiedOrderData {
+  id: number;
+  reference: string;
+  dateAdd: string;
+  currentState: number;
+  valid: boolean;
+}
+
+/** Datos mínimos del cliente que viajan una vez verificada la identidad. */
+export interface VerifiedCustomerData {
+  id: number;
+  email: string;
+  firstname: string;
+  lastname: string;
+  idLang: number;
+}
+
+/** Identidad verificada: única rama que lleva datos del pedido y del cliente. */
+export interface VerifiedOrderIdentity {
+  outcome: "VERIFIED";
+  order: VerifiedOrderData;
+  customer: VerifiedCustomerData;
+}
+
+/**
+ * Respuesta negativa uniforme. Referencia inexistente y email que no coincide
+ * devuelven exactamente este mismo objeto, sin eco de la referencia, del email
+ * ni de ningún dato del pedido: distinguir el motivo permitiría enumerar
+ * datos personales de clientes probando referencias.
+ */
+export interface UnverifiedOrderIdentity {
+  outcome: "IDENTITY_NOT_VERIFIED" | "AMBIGUOUS_REFERENCE" | "SERVICE_UNAVAILABLE";
+}
+
+/** Resultado discriminado de la validación de identidad de un pedido. */
+export type OrderIdentityResult = VerifiedOrderIdentity | UnverifiedOrderIdentity;
