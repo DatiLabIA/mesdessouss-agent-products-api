@@ -44,13 +44,16 @@ HTTP público, handler de Express.
 
 ## Modo TDD
 
-**Desactivado.** Fuente: `package.json` no declara ningún runner de tests
-(sin jest, vitest ni node:test en `scripts` ni en `devDependencies`).
-Verificación por comprobaciones funcionales ordinarias.
+**Desactivado al empezar**, porque `package.json` no declaraba ningún runner.
+La revisión RDD marcó esa ausencia como CRITICAL y la corrección añadió uno:
+el runner nativo de Node (`node:test` vía `tsx --test`), sin dependencias nuevas.
+El modo sigue siendo no-TDD (los tests se escribieron después del código, no antes),
+pero a partir de aquí las tareas nuevas sí tienen runner disponible.
 
 ## Verificación
 
 - `pnpm build` (tsc: typecheck + build)
+- `pnpm test` (`tsx --test "src/**/*.test.ts"`)
 
 ## Tareas
 
@@ -112,10 +115,31 @@ inexistente y email ajeno son indistinguibles desde fuera, que es el criterio 4.
 4. El resultado negativo no contiene la referencia, el email ni dato alguno del pedido.
 5. La clave del webservice se lee de entorno, nunca literal en el código.
 
+## Corrección exigida por la revisión RDD
+
+La revisión (lineage `review-6f6de8fdd46f7678`, lente `review-reliability`, riesgo
+medio) devolvió dos hallazgos CRITICAL, ambos aceptados y corregidos:
+
+**`R3-module-load-throw`** — `src/lib/prestashop-client.ts`. El guard de la API key
+lanzaba al evaluar el módulo, así que cualquier import de `order-identity` reventaba
+el proceso antes de ejecutar nada, y el alcance del fallo dependía del orden de los
+imports en vez de si el cliente llegaba a usarse. Corregido con un accesor diferido y
+memoizado (`getAuthHeader`), que comprueba en la primera petición. Sigue siendo
+fail-closed y ahora el error es atribuible al punto de uso. Nuevo `PrestashopConfigError`,
+no transitorio, que `performRequest` propaga sin reintentar.
+
+**`R3-no-automated-tests`** — `src/lib/order-identity.ts`. La ruta que decide si a un
+cliente se le entrega o se le niega su pedido no tenía ni un test. Los criterios 3 y 4
+estaban probados solo por un transcript manual que no se puede volver a correr.
+Añadidos 9 tests con el runner nativo de Node y `fetch` stubeado, sin dependencias nuevas.
+
+Los tests fijan además la regresión de `display=[...]`: el stub de `customers` devuelve
+la forma de array real, así que si alguien revierte `extractSingle` el test falla.
+
 ## Progreso
 
 T1–T4 completadas y verificadas. Los 5 criterios de aceptación se cumplen.
-Alcance de esta tanda cerrado.
+Corrección de la revisión aplicada. Alcance de esta tanda cerrado.
 
 ## Siguiente paso
 

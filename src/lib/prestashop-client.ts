@@ -16,21 +16,48 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 250;
 
-const apiKey = process.env.PRESTASHOP_API_KEY;
-
-if (!apiKey) {
-  throw new Error(
-    "La variable de entorno PRESTASHOP_API_KEY es obligatoria y no está definida. " +
-      "La clave del webservice de PrestaShop nunca se escribe literal en el código."
-  );
-}
-
 function normalizeBaseUrl(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
-const apiBaseUrl = normalizeBaseUrl(process.env.PRESTASHOP_API_URL ?? DEFAULT_API_URL);
-const authHeader = `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
+/** Falta configuración obligatoria para hablar con el webservice. No es transitorio. */
+export class PrestashopConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PrestashopConfigError";
+  }
+}
+
+let cachedAuthHeader: string | undefined;
+
+/**
+ * Cabecera de autenticación, leída de forma diferida y memoizada.
+ *
+ * La comprobación de la clave ocurre en la primera petición, no al evaluar el
+ * módulo. Si lanzara al importar, cualquier fichero que importase este cliente
+ * —un test, un script de tooling, o un módulo que lo arrastre de forma
+ * transitiva— reventaría el proceso antes de ejecutar nada, y el alcance del
+ * fallo dependería del orden de los imports en vez de si el cliente llega a
+ * usarse. La garantía sigue siendo fail-closed: sin clave no sale ninguna
+ * petición, y el error es atribuible al punto de uso.
+ */
+function getAuthHeader(): string {
+  if (cachedAuthHeader === undefined) {
+    const apiKey = process.env.PRESTASHOP_API_KEY;
+    if (!apiKey) {
+      throw new PrestashopConfigError(
+        "La variable de entorno PRESTASHOP_API_KEY es obligatoria y no está definida. " +
+          "La clave del webservice de PrestaShop nunca se escribe literal en el código."
+      );
+    }
+    cachedAuthHeader = `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
+  }
+  return cachedAuthHeader;
+}
+
+function getApiBaseUrl(): string {
+  return normalizeBaseUrl(process.env.PRESTASHOP_API_URL ?? DEFAULT_API_URL);
+}
 
 // ─── Errores tipados ─────────────────────────────────────────────────────
 
@@ -144,7 +171,7 @@ function buildQueryString(params: PrestashopQueryParams): string {
 }
 
 function buildUrl(resource: string, params: PrestashopQueryParams): string {
-  return `${apiBaseUrl}${resource}?${buildQueryString(params)}`;
+  return `${getApiBaseUrl()}${resource}?${buildQueryString(params)}`;
 }
 
 // ─── Normalización de la forma de la respuesta ──────────────────────────
@@ -236,6 +263,10 @@ async function performRequest(url: string): Promise<unknown> {
 }
 
 async function performSingleRequest(url: string): Promise<unknown> {
+  // Fail-closed: sin clave configurada no sale ninguna petición. `PrestashopConfigError`
+  // no es transitorio, así que `performRequest` lo propaga sin reintentar.
+  const authHeader = getAuthHeader();
+
   let response: Response;
   try {
     response = await fetch(url, {
