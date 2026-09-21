@@ -237,10 +237,43 @@ diff lo conoce y lo emite él mismo.
   `rule_templates`, `rule_settings`, `rule_holidays`. Incluye índice único parcial
   `rule_sets_one_active_per_client` (Prisma no sabe expresarlo) para que la base garantice
   como máximo un conjunto activo. Ruta: inline, diseño resuelto en conversación.
-- [ ] **T6** — Siembra desde `docs/reglas-lia-pedidos-retornos.md`: 13 filas de matriz,
-  41 marcas normalizadas, mapeo de estados por ID, plantillas y ajustes.
-- [ ] **T7** — Cálculo de hechos: grupos de estado, stock por línea (`quantity >= 0`),
-  marcas afectadas, días hábiles con festivos FR, retraso. Con tests.
+- [x] **T6** — Siembra desde `docs/reglas-lia-pedidos-retornos.md`: 13 filas de matriz,
+  44 marcas normalizadas (41 del documento + 3 submarcas reales del catálogo),
+  mapeo de estados por ID, 9 plantillas y 3 ajustes. Ruta: delegada (writer).
+- [x] **T7** — Cálculo de hechos: grupos de estado, stock por línea (`quantity >= 0`),
+  marcas afectadas, días hábiles con festivos FR, retraso. Ruta: delegada (writer).
+
+### Dos fallos en la costura entre T6 y T7
+
+Las dos tareas corrieron en paralelo y cada una quedó correcta por separado. Los
+problemas vivían justo en el medio, donde ninguno de los dos writers podía verlos:
+
+**`normalizeBrandKey` duplicada.** La siembra se escribió una copia privada para no
+acoplarse a una tarea en curso. Eran idénticas byte a byte, pero si alguna vez
+divergen, las claves sembradas dejan de casar con las que calcula el runtime y
+**todas** las marcas pasan a desconocidas, escalando cada pedido sin stock. Unificada:
+la siembra importa de `src/lib/brand-normalize.ts`, una sola fuente.
+
+**`DelayBucket` con dos vocabularios.** Los hechos producen `NONE|SHORT|LONG`; la
+matriz siembra dos filas con `POSITIVE`. Con una comparación por igualdad, las filas 6
+y 7 del §4 no matchearían nunca y un pedido sin stock **y atrasado** caería al
+fail-safe: escalaría en vez de recibir el mail 15. Resuelto con `matchesDelayBucket`
+en `order-facts.ts`, que traduce la condición al hecho, más el tipo
+`DelayBucketCondition` como superconjunto explícito. El evaluador (T8) debe usar esa
+función y nunca `===`.
+
+Ambas quedan fijadas por `src/data/order-rules-seed.test.ts`, que además verifica que
+ninguna fila sea inalcanzable, que las prioridades sean únicas, que el cajón de sastre
+no lleve condiciones, que todo desenlace tenga plantilla y que los grupos de estado
+sean los IDs verificados contra PrestaShop.
+
+### Pendiente de fuente externa
+
+Los `body` de 8 de las 9 plantillas están vacíos. Los textos viven en
+`scenario_lia.numbers` (hoja Feuil2), que no está en el repositorio. Solo el del mail 4
+se pudo sembrar, porque el §6 del documento lo transcribe completo. No se inventó texto
+comercial en francés. `factsToConvey` y `mustNotClaim` sí están sembrados para las nueve,
+que es lo que Lia necesita para redactar.
 - [ ] **T8** — Evaluador de la matriz + fail-safe en código + bloque `guidance`. Con tests.
 - [ ] **T9** — Consolidación: todas las consultas a PrestaShop en una sola llamada.
 - [ ] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).

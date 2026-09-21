@@ -18,6 +18,7 @@
     "sync:materials": "tsx scripts/sync-materials.ts",
     "seed:size-guides": "tsx scripts/seed-size-guides.ts",
     "seed:policies": "tsx scripts/seed-policies.ts",
+    "seed:rules": "tsx scripts/seed-rules.ts",
     "mcp": "tsx src/mcp-server.ts"
   },
   "dependencies": {
