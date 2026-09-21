@@ -274,7 +274,32 @@ Los `body` de 8 de las 9 plantillas están vacíos. Los textos viven en
 se pudo sembrar, porque el §6 del documento lo transcribe completo. No se inventó texto
 comercial en francés. `factsToConvey` y `mustNotClaim` sí están sembrados para las nueve,
 que es lo que Lia necesita para redactar.
-- [ ] **T8** — Evaluador de la matriz + fail-safe en código + bloque `guidance`. Con tests.
+- [x] **T8** — Evaluador de la matriz + fail-safe en código + bloque `guidance`.
+  Ruta: delegada (writer). 47 tests nuevos, incluida una batería con un caso por
+  cada una de las 13 filas del §4, usando la siembra real y no un fixture aparte.
+
+### Contradicción del documento resuelta en T8 — pendiente de confirmar con el cliente
+
+El §3.1 dice, en su nota de aplicación: *"En el Grupo B el estado de stock es
+irrelevante: una vez expedido el pedido, siempre es mail 3."* Pero la fila 13 del §4
+dice *"estado: cualquiera | SIN_STOCK | marca desconocida → Escalar"*. Las dos no
+pueden ser ciertas a la vez.
+
+**Se implementó el §3.1**: las cuatro comprobaciones de stock del fail-safe (marca
+desconocida, stock indeterminable, línea sin stock sin marca, y falta de plazo fiable)
+aplican **solo al grupo A**. El grupo D escala siempre, sin excepción.
+
+Razón: el plazo de marca existe para calcular una fecha de expedición. En un pedido ya
+expedido esa fecha ya ocurrió, así que una marca desconocida no puede cambiar la
+respuesta. Aplicar la fila 13 a todos los grupos escalaría pedidos perfectamente
+contestables — los que ya tienen número de seguimiento, que son la consulta más
+frecuente — por un dato que nadie va a usar. Y no es hipotético: en el pedido SURVHLYRI
+una combinación no tenía fila de `stock_available`, y hay dos marcas del catálogo
+(Mariner, MesDessous) que siguen sin plazo definido.
+
+El writer detectó la tensión y, correctamente, no la resolvió por su cuenta. Fijado con
+6 tests en `rule-evaluator.test.ts`. Revertirlo es una línea si el cliente prefiere la
+lectura literal de la fila 13.
 - [ ] **T9** — Consolidación: todas las consultas a PrestaShop en una sola llamada.
 - [ ] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
 - [ ] **T11** — Handler Express + ruta.
