@@ -351,9 +351,71 @@ Verificado sobre pedidos reales:
 |---|---|---|
 | LLKVUZDZD | 61 Retour Terminé → grupo R | `MAIL_12` con `processed_date: 16/09/2026` |
 | KKWNDFPHA | 10 Commande Terminée → grupo B | `MAIL_3` con referencia y URL de seguimiento resueltas |
-- [ ] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
+- [x] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
+  Ruta: delegada (writer). `pnpm build` y `pnpm test` en verde (150/150; 120
+  preexistentes + 30 nuevos). Sin ejecutar nada contra la base.
 - [ ] **T11** — Handler Express + ruta.
+
+### T10 — decisiones y hallazgos
+
+**División en dos ficheros, no uno.** `src/lib/prisma.ts` lanza al importarse
+si `DATABASE_URL` no está definida, y este repositorio no tiene `.env`. El
+prompt pedía extraer las funciones puras "de forma que se puedan testear sin
+Prisma": con todo en un solo `rule-queries.ts`, cualquier test de las
+funciones puras habría reventado al importar el módulo. Se separó en
+`src/lib/rule-set-validation.ts` (zod, enums cerrados, `parse*`,
+`buildLoadedRuleSet`, sin ninguna dependencia de Prisma) y `src/lib/rule-queries.ts`
+(todo lo que toca Prisma), que reexporta el módulo puro entero
+(`export * from "./rule-set-validation"`) para que quien importe
+`rule-queries.ts` no note la división. `rule-queries.test.ts` importa del
+módulo puro.
+
+**`pnpm generate` (`prisma generate`) sí se ejecutó.** No toca la base — solo
+regenera el cliente TypeScript local a partir de `schema.prisma` — pero era
+necesario: el cliente generado antes de esta tarea no conocía los 7 modelos
+del motor de reglas (T5 los agregó al esquema pero nadie había regenerado el
+cliente), así que `prisma.ruleSet` etc. no tipaban. Sin este paso `pnpm build`
+no podía pasar. No se corrió ninguna migración ni se tocó la base remota.
+
+**`checkBrandCoverage`: el conteo de "productos activos" sale de la tabla
+`products` local** (la misma que usa `search_products`), no de una consulta
+en vivo a PrestaShop: evita una llamada extra por marca y es el dato que ya
+está sincronizado. No estaba explícito en el prompt.
+
+**Desajuste Prisma/siembra: `RuleStateGroup.stateName`.** La columna es
+`String?` (nullable) pero `OrderStateGroupSeed.stateName` (el tipo de la
+siembra) es `string` no-nulo. `setStateGroup` no reusa `OrderStateGroupSeed`
+como tipo de entrada por esto: usa un `StateGroupInput` propio con
+`stateName: string | null`, fiel a la columna real.
+
+**Desajuste Prisma/siembra: `RuleTemplate.lang`.** El comentario del esquema
+dice "fr | en | es", pero `RuleTemplateSeed.lang` (y por lo tanto
+`RULE_TEMPLATE_LANGS`, la única fuente para el enum zod) solo acepta `"fr"`.
+Se dejó cerrado a `"fr"` a propósito, seguro para hoy porque la siembra actual
+no tiene ningún `en`/`es`; ampliarlo es una tarea futura si se agregan
+plantillas en otro idioma.
+
+**Desajuste Prisma/siembra: `RuleDecision.note` / `RuleSetting.note`.** Ambas
+columnas son `String?` (nullable), pero `RuleDecisionSeed.note` es `string` no
+nulo y se validó como obligatorio y no vacío en `rule-set-validation.ts`
+(una fila de la matriz sin nota legible no se puede explicar en
+`simulate_rules` ni en una escalada). `RuleSettingSeed.note` sigue opcional/
+nullable sin forzar contenido, porque no se usa para explicar nada al cliente.
+
+**No cubierto por el prompt, decisiones propias:**
+- `listRuleSets`/`getRuleSetDetail` (funciones de soporte para `list_rule_sets`/
+  `get_rules`) no estaban nombradas en el prompt pero eran necesarias para esas
+  dos tools de lectura.
+- `getRuleSetDetail` muestra el contenido crudo de un borrador sin pasarlo por
+  la validación fail-closed, a propósito: tiene que poder mostrar un borrador
+  roto tal cual está para que el editor vea qué arreglar.
+- `createRuleDraft`/`activateRuleSet`/`rollbackRuleSet` traducen también la
+  colisión de versión / archivado con un mensaje claro (mismo patrón que pedía
+  el prompt solo para la carrera de activación).
+- `rollbackRuleSet` no revalida el conjunto completo: un conjunto que llegó a
+  `active` alguna vez ya pasó por `activateRuleSet`, así que no se repite el
+  costo. Si se prefiere revalidar siempre, es un cambio de una línea.
 
 ## Siguiente paso
 
-T6 y T7, que no dependen de nada pendiente.
+T11 (handler Express + ruta), la única tarea que queda de la Fase 2.
