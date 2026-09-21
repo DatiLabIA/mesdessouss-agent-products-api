@@ -163,16 +163,64 @@ Cobertura ampliada de 9 a 14 tests, incluidos el 404 en hilos y el timeout real
 T1–T4 completadas y verificadas. Los 5 criterios de aceptación se cumplen.
 Corrección de la revisión aplicada. Alcance de esta tanda cerrado.
 
+---
+
+# Fase 2 — Motor de reglas
+
+## Decisiones tomadas
+
+**Alcance del bloque RETORNO.** Se arranca solo con lo que la API ya expone; no se
+construye el módulo que expondría `order_return`. Medido sobre el 1–22 de septiembre:
+de 467 pedidos con devolución, 380 tienen avoir **sin** movimiento de stock (y 137 de
+180 muestreados están en estado 61, o sea devoluciones reales y cerradas), mientras que
+13 de los 15 "movimiento sin avoir" son pedidos **anulados**. Conclusión: el motivo 10
+"Retour produit" no significa "llegó el paquete del cliente" y cubre un tercio de los
+casos. De los 5 mails de retorno, solo el **mail 12** es implementable, vía
+`current_state = 61` más la fecha del avoir. El resto escala.
+
+**Las reglas viven en base de datos**, editables por MCP sin desplegar. Lo que NO va a
+base de datos y nunca debe ir: el cálculo de los hechos (stock, días hábiles, marcas
+afectadas) y el fail-safe "ninguna regla matchea → escalar". Eso es código con tests.
+
+**Por qué es seguro meter la matriz en la base.** El §4 del documento ya es una tabla de
+verdad cerrada de 13 filas. Cada condición es un enum cerrado o `NULL` = "cualquiera".
+No hay expresiones ni operadores: una fila mala solo puede elegir un mail equivocado,
+nunca ejecutar comportamiento arbitrario, y el fail-safe en código degrada a escalar.
+
+**Ciclo de vida de edición.** No existe ninguna tool que edite el conjunto activo:
+se clona a borrador, se edita, se simula contra pedidos reales y recién ahí se publica
+con `confirm`. Quien va a editar es un modelo, no una persona llenando un formulario.
+
+## Hallazgo: las migraciones no llegaban a producción
+
+`prisma/migrations/` estaba en `.gitignore` (línea 16) con cero ficheros trackeados,
+mientras `start:prod` ejecuta `prisma migrate deploy`, que aplica las migraciones **del
+repositorio**. No había ninguna: ese comando no aplicaba nada y el esquema de producción
+se mantenía por otra vía. Cualquier tabla nueva habría quedado en una carpeta ignorada.
+
+Corregido: se versiona `prisma/migrations/` (las migraciones son código fuente).
+
+**Sin aplicar todavía.** `DATABASE_URL` apunta a un host remoto compartido
+(`b51gvf.easypanel.host`) y ya tenía `20260831000000_add_category_kind` pendiente de
+antes. La migración se generó con `prisma migrate diff` sin tocar la base. Aplicarla es
+decisión del usuario: `pnpm migrate:deploy`.
+
+## Tareas
+
+- [x] **T5** — Esquema Prisma del motor de reglas + migración `20260921000000_add_rules_engine`.
+  7 tablas: `rule_sets`, `rule_state_groups`, `rule_brand_lead_times`, `rule_decisions`,
+  `rule_templates`, `rule_settings`, `rule_holidays`. Incluye índice único parcial
+  `rule_sets_one_active_per_client` (Prisma no sabe expresarlo) para que la base garantice
+  como máximo un conjunto activo. Ruta: inline, diseño resuelto en conversación.
+- [ ] **T6** — Siembra desde `docs/reglas-lia-pedidos-retornos.md`: 13 filas de matriz,
+  41 marcas normalizadas, mapeo de estados por ID, plantillas y ajustes.
+- [ ] **T7** — Cálculo de hechos: grupos de estado, stock por línea (`quantity >= 0`),
+  marcas afectadas, días hábiles con festivos FR, retraso. Con tests.
+- [ ] **T8** — Evaluador de la matriz + fail-safe en código + bloque `guidance`. Con tests.
+- [ ] **T9** — Consolidación: todas las consultas a PrestaShop en una sola llamada.
+- [ ] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
+- [ ] **T11** — Handler Express + ruta.
+
 ## Siguiente paso
 
-Bloqueado a la espera de la decisión sobre `order_return` (el usuario lo está
-revisando). Cuando se resuelva:
-
-1. Consolidación: resto de consultas (líneas, marcas, stock, tracking, avoirs,
-   mensajes) en una sola llamada.
-2. Motor de reglas de `docs/reglas-lia-pedidos-retornos.md`, con las dos correcciones
-   ya verificadas: stock por `quantity >= 0` (no `>= cantidad_pedida`, porque el
-   pedido ya descontó), y normalización de marcas (acentos y espacios) antes de
-   cruzar con la tabla de plazos.
-3. Bloque `guidance` con `facts_to_convey` / `must_not_claim`.
-4. Handler Express + ruta.
+T6 y T7, que no dependen de nada pendiente.

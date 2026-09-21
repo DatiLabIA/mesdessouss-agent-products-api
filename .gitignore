@@ -13,7 +13,8 @@ build/
 !.env.example
 
 # ─── Prisma ──────────────────────────────────────────────────────────────────
-prisma/migrations/
+# Las migraciones SON codigo fuente: `prisma migrate deploy` las aplica desde el
+# repositorio, asi que ignorarlas dejaba el esquema de produccion sin forma de avanzar.
 
 # ─── Logs ────────────────────────────────────────────────────────────────────
 logs/
