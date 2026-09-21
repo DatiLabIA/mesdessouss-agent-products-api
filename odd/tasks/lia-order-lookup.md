@@ -300,7 +300,57 @@ una combinación no tenía fila de `stock_available`, y hay dos marcas del catá
 El writer detectó la tensión y, correctamente, no la resolvió por su cuenta. Fijado con
 6 tests en `rule-evaluator.test.ts`. Revertirlo es una línea si el cliente prefiere la
 lectura literal de la fila 13.
-- [ ] **T9** — Consolidación: todas las consultas a PrestaShop en una sola llamada.
+- [x] **T9** — Consolidación: todas las consultas a PrestaShop en una sola llamada,
+  en tres olas paralelas. Ruta: delegada (writer) + correcciones del padre.
+
+### Cinco fallos que la suite en verde no veía
+
+El writer entregó 120/120 tests y build limpio. Una comprobación end-to-end contra la
+API **real** encontró cuatro bugs, todos con la misma causa raíz, y un quinto de
+distinto origen. Los tests unitarios stubean `fetch`, así que solo prueban lo que
+creemos que devuelve la API, no lo que devuelve.
+
+**Causa raíz, verificada**: PrestaShop serializa el campo `id` como **número** y todos
+los demás campos `id_*` como **string**, en la misma respuesta.
+
+```
+orders.id            -> int 705570      order_details.product_id  -> str '63242'
+products.id          -> int 63242       stock_availables.id_product -> str '63242'
+orders.current_state -> str '61'
+```
+
+Por eso `producto.id === linea.product_id` compara `63242` contra `"63242"` y da falso
+**siempre**. Sin excepción, sin log: solo un resultado vacío que parece legítimo.
+
+1. **Join de marcas muerto** → todas las líneas con `brand: null`, y con eso la tabla de
+   44 plazos quedaba sin usarse nunca.
+2. **URL de seguimiento en `null`** → el mapa de transportistas se indexaba por `id`
+   numérico y se consultaba con `id_carrier` string. El mail 3 depende enteramente de
+   ese dato.
+3. **`return.completed` siempre false** → `"61" === 61`.
+4. **Nombre del estado crudo** → los campos traducibles no son strings sino arrays
+   `[{id:"1",value:"Retour Terminé"},…]`. Viajaba el array entero al payload.
+
+Corregido normalizando en la frontera: `toNumericId` en `order-identity.ts` (donde
+nacía la mentira de tipos) y en cada cruce de la consolidación, más
+`resolveTranslatable` para los campos multiidioma.
+
+**5. `MAIL_12` era inalcanzable.** El estado 61 no estaba en ningún grupo, caía en D y
+escalaba; y no había ninguna fila de matriz que produjera ese desenlace. La plantilla
+estaba sembrada sin ninguna forma de llegar a ella — justo el único mail de retorno que
+habíamos decidido implementar. Resuelto añadiendo el grupo `R` (el §3.2 es un árbol
+aparte del §4) con una fila de prioridad 0, que sigue siendo dato editable por MCP.
+
+### `pnpm check:pipeline`
+
+La comprobación end-to-end quedó como herramienta del proyecto:
+`pnpm check:pipeline <REFERENCIA> <EMAIL>`. Es lo único que caza esta clase de fallo.
+Verificado sobre pedidos reales:
+
+| Pedido | Estado | Veredicto |
+|---|---|---|
+| LLKVUZDZD | 61 Retour Terminé → grupo R | `MAIL_12` con `processed_date: 16/09/2026` |
+| KKWNDFPHA | 10 Commande Terminée → grupo B | `MAIL_3` con referencia y URL de seguimiento resueltas |
 - [ ] **T10** — Tools MCP de reglas (lectura, borrador, simulación, publicación, rollback).
 - [ ] **T11** — Handler Express + ruta.
 

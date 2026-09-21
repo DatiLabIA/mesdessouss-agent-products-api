@@ -41,7 +41,14 @@ export interface PrestashopOrderRecord {
   reference: string;
   id_customer: number;
   date_add: string;
-  current_state: number;
+  /**
+   * Verificado contra la API: PrestaShop serializa el campo `id` como número
+   * pero TODOS los demás campos `id_*` como string, incluido este. Declararlo
+   * `number` a secas era una mentira de tipos que TypeScript no puede detectar
+   * en runtime, y aguas abajo hacía que `currentState === 61` fuera siempre
+   * falso. Se normaliza con `toNumericId` antes de exponerlo.
+   */
+  current_state: string | number;
   /** PrestaShop suele serializar este booleano como `"0"`/`"1"`. */
   valid: string | boolean;
 }
@@ -63,6 +70,19 @@ interface PrestashopCustomerThreadRecord {
 
 function toBool(value: string | boolean): boolean {
   return value === true || value === "1";
+}
+
+/**
+ * Normaliza un identificador de PrestaShop a número.
+ *
+ * Hace falta porque la API mezcla los dos tipos en la misma respuesta: el campo
+ * `id` viene como número y cualquier otro `id_*` como string. Sin normalizar,
+ * comparaciones y joins perfectamente razonables (`producto.id === linea.product_id`,
+ * `estado === 61`) son siempre falsos y el fallo es silencioso: no hay excepción,
+ * solo un resultado vacío que parece un dato legítimo.
+ */
+export function toNumericId(value: string | number): number {
+  return typeof value === "number" ? value : Number.parseInt(value, 10);
 }
 
 // ─── Paso 1: búsqueda por referencia ──────────────────────────────────────
@@ -202,7 +222,7 @@ export async function verifyOrderIdentity(input: OrderIdentityInput): Promise<Or
       id: order.id,
       reference: order.reference,
       dateAdd: order.date_add,
-      currentState: order.current_state,
+      currentState: toNumericId(order.current_state),
       valid: toBool(order.valid),
     },
     customer: {

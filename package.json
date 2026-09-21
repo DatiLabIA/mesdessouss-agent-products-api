@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "test": "tsx --test \"src/**/*.test.ts\"",
+    "check:pipeline": "tsx scripts/check-order-pipeline.ts",
     "start": "node dist/server.js",
     "start:prod": "prisma migrate deploy && node dist/server.js",
     "generate": "prisma generate",

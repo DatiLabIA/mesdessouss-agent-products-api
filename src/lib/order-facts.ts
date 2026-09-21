@@ -16,7 +16,14 @@ import { normalizeBrandKey } from "./brand-normalize";
 // ─── Entrada ────────────────────────────────────────────────────────────
 
 /** Grupo del árbol de decisión (§2.1). `D` es "no cubierto por ninguna regla": siempre escalar. */
-export type StateGroup = "A" | "B" | "C" | "D";
+/**
+ * Rama del árbol de decisión. A/B/C/D son los grupos del §2.1 (bloque PEDIDO).
+ * `R` es el bloque RETORNO del §3.2, que el documento trata como un árbol aparte
+ * y no como una fila más de la matriz del §4. Sin una rama propia, el estado 61
+ * "Retour Terminé" caía en D y escalaba: el mail 12 tenía plantilla sembrada y
+ * ninguna forma de llegar a ella.
+ */
+export type StateGroup = "A" | "B" | "C" | "D" | "R";
 
 /** Estado de stock del pedido completo (§2.2). */
 export type StockStatus = "EN_STOCK" | "SIN_STOCK";

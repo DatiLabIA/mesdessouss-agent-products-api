@@ -30,7 +30,7 @@ export const RULES_SEED_VERSION = 1;
 // fila "D" por cada uno de los ~52 estados restantes: no se siembran.
 // ═══════════════════════════════════════════════════════════════════════
 
-export type StateGroupCode = "A" | "B" | "C" | "D";
+export type StateGroupCode = "A" | "B" | "C" | "D" | "R";
 
 export interface OrderStateGroupSeed {
   orderStateId: number;
@@ -40,6 +40,9 @@ export interface OrderStateGroupSeed {
 }
 
 export const stateGroupSeed: OrderStateGroupSeed[] = [
+  // Bloque RETORNO (§3.2). Es un árbol aparte del §4: sin esta fila el 61 caía en
+  // el grupo D y escalaba, dejando el mail 12 sembrado pero inalcanzable.
+  { orderStateId: 61, stateName: "Retour Terminé", groupCode: "R" },
   // Grupo A — pedido no expedido
   { orderStateId: 18, stateName: "Chèque reçu", groupCode: "A" },
   { orderStateId: 17, stateName: "Commande en cours de traitement", groupCode: "A" },
@@ -150,10 +153,12 @@ export const brandLeadTimeSeed: BrandLeadTimeSeed[] = [
 // §4 — Matriz de decisión cerrada del bloque PEDIDO
 //
 // Evaluada por `priority` ascendente: gana la primera fila que matchea.
-// Cada condición es un enum cerrado o `null` = "cualquiera". El bloque
-// RETORNO (§3.2) no tiene matriz propia en el documento — es un árbol
-// simple, no una tabla de verdad — por eso no aparece aquí; su único mail
-// implementable en esta fase (mail 12) solo tiene plantilla más abajo.
+// Cada condición es un enum cerrado o `null` = "cualquiera".
+//
+// El bloque RETORNO (§3.2) no tiene matriz propia en el documento — es un
+// árbol simple, no una tabla de verdad — pero su único mail implementable
+// en esta fase (el 12) necesita una fila igual, o quedaría sembrado sin
+// ninguna forma de llegar a él. Entra como grupo `R` con prioridad 0.
 // ═══════════════════════════════════════════════════════════════════════
 
 export type StockStatus = "EN_STOCK" | "SIN_STOCK";
@@ -337,6 +342,23 @@ export const ruleDecisionSeed: RuleDecisionSeed[] = [
     historyHasInfo: null,
     outcome: "ESCALATE",
     note: "Grupo D: cualquier estado no cubierto por las reglas (Annulé, Remboursé, etc.) se escala siempre (§4 fila 12).",
+  },
+  {
+    // Prioridad 0: el bloque RETORNO es una rama distinta del árbol, no una fila
+    // más de la matriz del §4. Se comprueba antes que nada y no puede colisionar
+    // con las filas de los grupos A/B/C/D.
+    priority: 0,
+    stateGroup: "R",
+    stockStatus: null,
+    brandCount: null,
+    delayBucket: null,
+    hasTracking: null,
+    historyHasInfo: null,
+    outcome: "MAIL_12",
+    note:
+      "Bloque RETORNO (§3.2): devolución terminada. Es el único de los cinco mails de " +
+      "retorno implementable con lo que la API expone; los otros cuatro necesitan " +
+      "order_returns, que no existe en el webservice.",
   },
   {
     priority: 13,
