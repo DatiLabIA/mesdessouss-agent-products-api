@@ -205,6 +205,31 @@ Corregido: se versiona `prisma/migrations/` (las migraciones son código fuente)
 antes. La migración se generó con `prisma migrate diff` sin tocar la base. Aplicarla es
 decisión del usuario: `pnpm migrate:deploy`.
 
+## Corrección exigida por la revisión (lineage `review-6c5160bccd7e3f1b`)
+
+**`R3-partial-index-drift`** — el índice parcial `rule_sets_one_active_per_client`
+existía solo como SQL suelto en la migración, y el esquema no lo describía. Prisma
+compara el esquema contra la base migrada, así que lo habría tratado como sobrante y
+la siguiente migración habría generado su `DROP`: la única garantía de "un solo
+conjunto activo" desaparecía en silencio. Corregido moviéndolo al esquema con el
+soporte nativo de índices parciales de Prisma 7 (`where` en `@@unique`), que es
+preview feature y requiere `previewFeatures = ["partialIndexes"]`. Ahora el motor de
+diff lo conoce y lo emite él mismo.
+
+**`R3-nonidempotent-baseline`** — parcialmente corregido, y a propósito:
+
+- La migración del motor de reglas (aún sin aplicar en ningún lado) pasó a DDL
+  idempotente: 7 tablas y 12 índices con `IF NOT EXISTS`, y las 5 claves foráneas
+  envueltas en bloques que ignoran el duplicado, ya que Postgres no admite
+  `IF NOT EXISTS` en `ADD CONSTRAINT`.
+- **No se tocaron las tres migraciones no idempotentes ya aplicadas.** Prisma guarda
+  un checksum de cada migración aplicada; editarlas arriesga romper el despliegue de
+  una base que hoy funciona, a cambio de un escenario que se resuelve con
+  `prisma migrate resolve --applied`. El procedimiento quedó documentado en
+  `prisma/migrations/README.md`.
+- Verificado con `prisma migrate status`: la base remota ya tiene aplicadas las 7
+  primeras, así que ahí el historial está baselineado y el riesgo es latente, no actual.
+
 ## Tareas
 
 - [x] **T5** — Esquema Prisma del motor de reglas + migración `20260921000000_add_rules_engine`.

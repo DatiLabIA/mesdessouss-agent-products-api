@@ -1,5 +1,11 @@
 generator client {
   provider = "prisma-client-js"
+  // Indices parciales (`where` en @@unique). Necesario para que la garantia de
+  // "un solo conjunto de reglas activo por cliente" viva en el esquema: si solo
+  // existiera como SQL suelto en la migracion, el motor de diff la trataria como
+  // sobrante y la borraria en la siguiente migracion. Es preview en Prisma 7:
+  // revisar al subir de version mayor.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -113,8 +119,7 @@ model StorePolicy {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Version completa del conjunto de reglas. Nunca se edita la activa: se clona a
-/// un borrador, se simula y recien ahi se publica. Un indice unico parcial en la
-/// migracion garantiza como maximo un conjunto activo por cliente.
+/// un borrador, se simula y recien ahi se publica.
 model RuleSet {
   id          Int       @id @default(autoincrement())
   clientId    String    @map("client_id") @db.VarChar(50)
@@ -132,6 +137,15 @@ model RuleSet {
   settings       RuleSetting[]
 
   @@unique([clientId, version])
+  /// Como maximo UN conjunto activo por cliente, garantizado por la base y no por
+  /// la aplicacion: si dos publicaciones compiten, la segunda falla en vez de dejar
+  /// dos conjuntos activos y que la respuesta al cliente dependa de cual se lea antes.
+  ///
+  /// Va en el esquema y no como SQL suelto en la migracion a proposito. Prisma compara
+  /// el esquema contra la base migrada, asi que un indice que solo existiera en el SQL
+  /// seria tratado como sobrante y la siguiente migracion generaria su DROP: la garantia
+  /// desapareceria en silencio. Declarado aqui, el motor de diff lo conoce y lo conserva.
+  @@unique([clientId], where: { status: "active" }, map: "rule_sets_one_active_per_client")
   @@index([clientId, status])
   @@map("rule_sets")
 }
