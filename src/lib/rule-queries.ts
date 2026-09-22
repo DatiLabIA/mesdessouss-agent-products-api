@@ -261,9 +261,36 @@ export async function createRuleDraft(clientId: string, note: string): Promise<R
 
   const clonedFrom: "active" | "seed" = active !== null ? "active" : "seed";
 
-  const stateGroupsData = active !== null ? active.stateGroups : stateGroupSeed;
-  const brandLeadTimesData = active !== null ? active.brandLeadTimes : brandLeadTimeSeed;
-  const decisionsData = active !== null ? active.decisions : ruleDecisionSeed;
+  // Al clonar desde el conjunto activo hay que QUITAR `id` y `ruleSetId` de cada fila:
+  // son filas completas de Prisma, y un `createMany` anidado infiere la relación y
+  // rechaza la clave foránea explícita. Las plantillas y los ajustes ya se mapeaban;
+  // estas tres se pasaban crudas y hacían fallar la creación del borrador entera.
+  const stateGroupsData =
+    active !== null
+      ? active.stateGroups.map((g) => ({
+          orderStateId: g.orderStateId,
+          stateName: g.stateName,
+          groupCode: g.groupCode,
+        }))
+      : stateGroupSeed;
+  const brandLeadTimesData =
+    active !== null
+      ? active.brandLeadTimes.map((b) => ({ brand: b.brand, brandKey: b.brandKey, leadDays: b.leadDays }))
+      : brandLeadTimeSeed;
+  const decisionsData =
+    active !== null
+      ? active.decisions.map((d) => ({
+          priority: d.priority,
+          stateGroup: d.stateGroup,
+          stockStatus: d.stockStatus,
+          brandCount: d.brandCount,
+          delayBucket: d.delayBucket,
+          hasTracking: d.hasTracking,
+          historyHasInfo: d.historyHasInfo,
+          outcome: d.outcome,
+          note: d.note,
+        }))
+      : ruleDecisionSeed;
   const templatesData =
     active !== null
       ? active.templates.map((t) => ({
