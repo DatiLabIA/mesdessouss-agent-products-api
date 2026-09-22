@@ -295,6 +295,115 @@ ruido en un caption de WhatsApp. El detalle completo viaja en `details`.
 
 ---
 
+### 3.4 `order_lookup` — Estado de un pedido
+
+**POST** `/mesdessous/order_lookup`
+
+Es la tool que le permite a Lia responder sobre pedidos: dónde está, cuándo llega, por qué se retrasa, el número de seguimiento, una devolución o un reembolso.
+
+A diferencia de las otras tres, **esta no devuelve datos en crudo para que el agente los interprete**. Consulta PrestaShop, aplica el motor de reglas del cliente (`docs/reglas-lia-pedidos-retornos.md`) y devuelve un bloque `guidance` que le dice a Lia exactamente qué transmitir y qué tiene prohibido afirmar. El motivo es concreto: una auditoría sobre 7 pedidos reales mostró que los campos obvios de PrestaShop mienten — `current_state` era engañoso en 4 de 5 casos.
+
+#### Qué consulta por dentro
+
+En una sola llamada, en tres olas paralelas:
+
+| Recurso de PrestaShop | Para qué |
+|---|---|
+| `orders`, `order_details`, `order_states` | Cabecera, líneas y estado |
+| `customers`, `customer_threads` | Validación de identidad |
+| `products` | Marca de cada línea (para el plazo de expedición) |
+| `stock_availables` | Cobertura de stock por línea |
+| `order_carriers`, `carriers` | Número y URL de seguimiento |
+| `order_histories` | Fecha de expedición |
+| `order_slip`, `cart_rules` | Abonos, y si fueron vale o dinero |
+| `customer_messages` | Si el cliente está esperando respuesta |
+
+Todo en **solo lectura**. La tool nunca escribe en PrestaShop.
+
+#### Input
+
+```json
+{
+  "reference": "SURVHLYRI",
+  "email": "cliente@ejemplo.fr"
+}
+```
+
+**Los dos son obligatorios.** La referencia es el criterio de búsqueda; el email es una puerta de entrega de datos, no un criterio. Nunca se busca por email: eso convertiría el endpoint en un oráculo de "este correo es cliente nuestro".
+
+#### Response — identidad verificada
+
+```json
+{
+  "found": true,
+  "identity_verified": true,
+  "order": { "reference": "KKWNDFPHA", "status": { "id": 10, "name": "Commande Terminée" }, "group": "B", "…": "…" },
+  "customer": { "firstname": "Nathalie", "lastname": "Mommaerts", "…": "…" },
+  "lines": [ { "name": "…", "brand": "Lise Charmel", "stockQuantity": 0, "covered": true } ],
+  "shipping": { "carrierName": "Colissimo Points de retrait", "trackingNumber": "CM288076007FR", "trackingUrl": "http://…", "shippedWithoutTracking": false },
+  "refund": null,
+  "return": { "dataAvailable": false, "completed": false, "reason": "…" },
+  "conversation": { "threadId": 182156, "awaitingShopReply": false },
+  "guidance": {
+    "situation": "MAIL_3",
+    "must_escalate": false,
+    "reply_language": "fr",
+    "facts_to_convey": [
+      { "key": "order_reference", "value": "KKWNDFPHA" },
+      { "key": "tracking_url", "value": "http://www.colissimo.fr/…parcelnumber=CM288076007FR" }
+    ],
+    "must_not_claim": [
+      "must not claim the parcel was delivered unless tracking confirms it",
+      "…"
+    ],
+    "missing_facts": []
+  }
+}
+```
+
+**`guidance` es lo único que Lia necesita para redactar.** El resto del payload es contexto por si el cliente repregunta.
+
+- `facts_to_convey` — los datos que debe transmitir. Las fechas ya vienen en formato francés `DD/MM/AAAA`: se copian tal cual, no se recalculan.
+- `must_not_claim` — afirmaciones que **en este caso concreto** serían falsas.
+- `must_escalate` — si es `true`, Lia no da ningún estado del pedido y deriva a una persona.
+
+#### Response — identidad no verificada
+
+```json
+{ "found": false, "identity_verified": false, "outcome": "IDENTITY_NOT_VERIFIED" }
+```
+
+**Tres claves y ninguna más, siempre idénticas.** Una referencia inexistente y un email que no coincide devuelven exactamente lo mismo, byte a byte. Distinguirlos permitiría que alguien con una referencia filtrada —viajan en capturas de pantalla y correos reenviados— probara emails hasta acertar y se llevara el nombre, la dirección y el historial de compra de una persona real. No es una sutileza: es el riesgo RGPD que el propio documento de reglas señala.
+
+#### 🚨 Desajuste con el contrato de §2 — decidir antes de activar
+
+El §2 de esta guía establece que los errores que el agente debe gestionar con el usuario van en **HTTP 200 con `{ "error": "…" }`**, y que 4xx/5xx se reserva para lo que DatiHub debe loguear. El handler actual **no cumple eso del todo**:
+
+| Caso | Devuelve hoy | ¿Cumple §2? | Recomendación |
+|---|---|---|---|
+| Identidad no verificada | 200 | ✅ | Dejar como está |
+| Éxito | 200 | ✅ | Dejar como está |
+| Falta `reference` o `email` | **400** | ❌ | **Pasar a 200 + `{error}`** para que Lia pida el dato que falta en vez de recibir un fallo duro |
+| Demasiados intentos fallidos | **429** | ❌ | **Pasar a 200 + `{error}`** para que Lia pueda decírselo al cliente |
+| Reglas no configuradas / PrestaShop caído | **503** | ⚠️ discutible | **Pasar a 200 + `{error}`** |
+| Error inesperado | 500 | ✅ | Dejar como está |
+
+El 503 es el que más importa, y no es teórico: la base de datos de reglas se cortó **cuatro veces** durante el despliegue del 22/09 (dos `P1001`, dos `SocketTimeout`). Con 503, Lia recibe un fallo duro sin nada que decir — y el comportamiento documentado del agente ante una consulta que falla es **rellenar el hueco inventando**, que es justo lo que esta tool existe para impedir.
+
+Mi recomendación: mover 400, 429 y 503 a `HTTP 200` con `{ "error": "…" }`, y dejar el 500 para lo genuinamente inesperado. Es un cambio acotado al handler. **Pendiente de decisión del equipo.**
+
+#### Lo que esta tool NO puede responder
+
+Hay que saberlo para no prometerlo:
+
+- **Devoluciones en curso.** El recurso `order_returns` no existe en el webservice de PrestaShop. De los cinco mails de retorno del documento de reglas, solo el 12 ("Retour terminé") es implementable. Mientras una devolución está en curso, no deja ninguna traza legible.
+- **Si se usó la etiqueta de retorno** (de lo que dependen los 6 € de descuento en el reembolso).
+- **El motivo declarado de una devolución.**
+- **Pedidos del grupo D** (anulados, reembolsados, error de pago…) y los ~52 estados no mapeados: siempre escalan.
+- **Marcas sin plazo definido.** Hoy quedan dos del catálogo sin plazo (Mariner, MesDessous): un pedido no expedido que las incluya escala.
+
+---
+
 ## 4. Base de datos recomendada (PostgreSQL)
 
 ```sql
@@ -599,10 +708,29 @@ Authorization: Bearer {datihub-admin-token}
         },
         "required": ["topic"]
       }
+    },
+    {
+      "name": "order_lookup",
+      "description": "Look up the real status of a customer's order: where it is, when it will arrive, why it is delayed, whether it shipped, its tracking link, a return or a refund. ALWAYS call this before saying anything about an order; never answer from the conversation history. Requires BOTH the order reference (9 letters and digits, e.g. SURVHLYRI) and the email attached to that order — ask the customer for whichever is missing. Without both, no information is released: this is personal-data protection, not an optional step. The response carries a 'guidance' block with 'facts_to_convey' (what to tell the customer), 'must_not_claim' (what would be false in this specific case) and 'must_escalate'. When 'must_escalate' is true, give no order status at all and hand over to a human agent.",
+      "endpoint": "https://catalog-api.tu-dominio.com/mesdessous/order_lookup",
+      "apiKey": "$CATALOG_MESDESSOUS_API_KEY",
+      "timeoutMs": 20000,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "reference": { "type": "string", "description": "Order reference: 9 letters and digits, as printed on the confirmation email (e.g. SURVHLYRI)" },
+          "email":     { "type": "string", "description": "Email attached to the order. Mandatory: no order information is released without it" }
+        },
+        "required": ["reference", "email"]
+      }
     }
   ]
 }
 ```
+
+> **Sobre `timeoutMs: 20000`**: medido contra producción, el camino feliz tarda **1,7 a 3,8 segundos** (identidad ~0,6-1,8s + consolidación ~1,2-2,0s; el motor de reglas es puro y tarda 0ms). Los 20 s dan margen para los dos reintentos que el cliente hace ante fallos transitorios de PrestaShop. **No lo bajes**: si la consulta se corta por tiempo, el agente rellena el hueco inventando, que es exactamente lo que esta tool existe para impedir.
+
+> **Sobre la clave de PrestaShop**: `PRESTASHOP_API_KEY` es una variable del **Catalog Service**, no de DatiHub. En el lado de DatiHub no hay que añadir nada nuevo: `order_lookup` reutiliza el mismo `CATALOG_MESDESSOUS_API_KEY` que las otras tres tools.
 
 > **Nota sobre `apiKey`**: El prefijo `$` indica que DatiHub resolverá el valor desde una variable de entorno del servidor. `"$CATALOG_MESDESSOUS_API_KEY"` → `process.env.CATALOG_MESDESSOUS_API_KEY`. El secreto real nunca se almacena en la base de datos.
 

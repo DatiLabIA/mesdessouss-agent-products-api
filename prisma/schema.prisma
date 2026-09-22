@@ -1,5 +1,11 @@
 generator client {
   provider = "prisma-client-js"
+  // Indices parciales (`where` en @@unique). Necesario para que la garantia de
+  // "un solo conjunto de reglas activo por cliente" viva en el esquema: si solo
+  // existiera como SQL suelto en la migracion, el motor de diff la trataria como
+  // sobrante y la borraria en la siguiente migracion. Es preview en Prisma 7:
+  // revisar al subir de version mayor.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -98,4 +104,159 @@ model StorePolicy {
 
   @@unique([clientId, topic])
   @@map("store_policies")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MOTOR DE REGLAS DE PEDIDOS
+//
+//  Las reglas viven en base de datos para poder editarlas por MCP sin desplegar.
+//  Lo que NO vive aqui y nunca debe hacerlo: el calculo de los hechos (stock,
+//  dias habiles, marcas afectadas) y el fail-safe "si ninguna regla matchea,
+//  escalar". Eso es codigo con tests, porque si se toca mal se le miente a un
+//  cliente sobre su pedido.
+//
+//  Fuente de la siembra inicial: docs/reglas-lia-pedidos-retornos.md
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Version completa del conjunto de reglas. Nunca se edita la activa: se clona a
+/// un borrador, se simula y recien ahi se publica.
+model RuleSet {
+  id          Int       @id @default(autoincrement())
+  clientId    String    @map("client_id") @db.VarChar(50)
+  version     Int
+  /// draft | active | archived
+  status      String    @default("draft") @db.VarChar(10)
+  note        String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  activatedAt DateTime? @map("activated_at")
+
+  stateGroups    RuleStateGroup[]
+  brandLeadTimes RuleBrandLeadTime[]
+  decisions      RuleDecision[]
+  templates      RuleTemplate[]
+  settings       RuleSetting[]
+
+  @@unique([clientId, version])
+  /// Como maximo UN conjunto activo por cliente, garantizado por la base y no por
+  /// la aplicacion: si dos publicaciones compiten, la segunda falla en vez de dejar
+  /// dos conjuntos activos y que la respuesta al cliente dependa de cual se lea antes.
+  ///
+  /// Va en el esquema y no como SQL suelto en la migracion a proposito. Prisma compara
+  /// el esquema contra la base migrada, asi que un indice que solo existiera en el SQL
+  /// seria tratado como sobrante y la siguiente migracion generaria su DROP: la garantia
+  /// desapareceria en silencio. Declarado aqui, el motor de diff lo conoce y lo conserva.
+  @@unique([clientId], where: { status: "active" }, map: "rule_sets_one_active_per_client")
+  @@index([clientId, status])
+  @@map("rule_sets")
+}
+
+/// Estado de PrestaShop -> grupo del arbol de decision (§2.1 del documento).
+/// El mapeo es por ID y nunca por nombre: el estado 10 paso de "Paiement ok" a
+/// "Commande Terminee" durante el desarrollo. `stateName` es solo informativo.
+model RuleStateGroup {
+  id           Int     @id @default(autoincrement())
+  ruleSetId    Int     @map("rule_set_id")
+  ruleSet      RuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  orderStateId Int     @map("order_state_id")
+  stateName    String? @map("state_name") @db.VarChar(120)
+  /// A = no expedido | B = expedido | C = expedicion parcial | D = resto (escalar)
+  groupCode    String  @map("group_code") @db.VarChar(1)
+
+  @@unique([ruleSetId, orderStateId])
+  @@index([ruleSetId, groupCode])
+  @@map("rule_state_groups")
+}
+
+/// Plazo de expedicion por marca en dias habiles (§2.4). Una marca sin fila
+/// escala: no hay valor por defecto, por decision del documento (§7.4).
+/// `brandKey` es la grafia normalizada (sin acentos, sin espacios, minusculas)
+/// para que "Simone Perele" case con "Simone Perele" de la tabla original.
+model RuleBrandLeadTime {
+  id        Int     @id @default(autoincrement())
+  ruleSetId Int     @map("rule_set_id")
+  ruleSet   RuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  brand     String  @db.VarChar(100)
+  brandKey  String  @map("brand_key") @db.VarChar(100)
+  leadDays  Int     @map("lead_days")
+
+  @@unique([ruleSetId, brandKey])
+  @@map("rule_brand_lead_times")
+}
+
+/// La matriz cerrada de §4, evaluada por `priority` ascendente: gana la primera
+/// fila que matchea. Cada condicion es un enum cerrado o NULL = "cualquiera".
+/// No hay expresiones ni operadores: una fila mala solo puede elegir un mail
+/// equivocado, nunca ejecutar comportamiento arbitrario.
+model RuleDecision {
+  id             Int      @id @default(autoincrement())
+  ruleSetId      Int      @map("rule_set_id")
+  ruleSet        RuleSet  @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  priority       Int
+  /// A | B | C | D
+  stateGroup     String?  @map("state_group") @db.VarChar(1)
+  /// EN_STOCK | SIN_STOCK
+  stockStatus    String?  @map("stock_status") @db.VarChar(10)
+  /// ONE | MANY — contadas solo sobre las lineas sin stock (§2.3)
+  brandCount     String?  @map("brand_count") @db.VarChar(4)
+  /// NONE | SHORT | LONG | POSITIVE — los umbrales viven en RuleSetting
+  delayBucket    String?  @map("delay_bucket") @db.VarChar(10)
+  hasTracking    Boolean? @map("has_tracking")
+  historyHasInfo Boolean? @map("history_has_info")
+  /// MAIL_1 … MAIL_15 | ESCALATE
+  outcome        String   @db.VarChar(20)
+  note           String?  @db.Text
+
+  @@unique([ruleSetId, priority])
+  @@index([ruleSetId, stateGroup])
+  @@map("rule_decisions")
+}
+
+/// Lo que se le entrega a Lia por desenlace e idioma. `body` es el texto aprobado
+/// que sirve de base; `factsToConvey` son los datos que tiene que transmitir y
+/// `mustNotClaim` lo que tiene prohibido afirmar, que es lo que sustituye al
+/// "nunca se improvisa" del §7.2 ahora que Lia redacta en vez de repetir.
+model RuleTemplate {
+  id            Int     @id @default(autoincrement())
+  ruleSetId     Int     @map("rule_set_id")
+  ruleSet       RuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  outcome       String  @db.VarChar(20)
+  /// fr | en | es
+  lang          String  @db.VarChar(5)
+  body          String  @db.Text
+  /// string[] — claves de hechos a transmitir
+  factsToConvey Json    @map("facts_to_convey")
+  /// string[] — afirmaciones prohibidas para este desenlace
+  mustNotClaim  Json    @map("must_not_claim")
+
+  @@unique([ruleSetId, outcome, lang])
+  @@map("rule_templates")
+}
+
+/// Umbrales configurables: plazo EN_STOCK (48h habiles), ventana del mail 2
+/// (1 a 3 dias), etc. Los §8.1 del documento que siguen abiertos se resuelven
+/// cambiando una fila de aqui, no desplegando.
+model RuleSetting {
+  id        Int     @id @default(autoincrement())
+  ruleSetId Int     @map("rule_set_id")
+  ruleSet   RuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  key       String  @db.VarChar(60)
+  value     Json
+  note      String? @db.Text
+
+  @@unique([ruleSetId, key])
+  @@map("rule_settings")
+}
+
+/// Festivos de Francia metropolitana y cierres de la tienda. No cuelgan de un
+/// RuleSet porque son hechos de calendario, no decisiones de negocio: cambiar
+/// de version de reglas no cambia cuando cae el 14 de julio.
+model RuleHoliday {
+  id       Int      @id @default(autoincrement())
+  clientId String   @map("client_id") @db.VarChar(50)
+  day      DateTime @db.Date
+  label    String?  @db.VarChar(120)
+
+  @@unique([clientId, day])
+  @@index([clientId, day])
+  @@map("rule_holidays")
 }

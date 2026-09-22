@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "test": "tsx --test \"src/**/*.test.ts\"",
+    "check:pipeline": "tsx scripts/check-order-pipeline.ts",
     "start": "node dist/server.js",
     "start:prod": "prisma migrate deploy && node dist/server.js",
     "generate": "prisma generate",
@@ -18,6 +19,7 @@
     "sync:materials": "tsx scripts/sync-materials.ts",
     "seed:size-guides": "tsx scripts/seed-size-guides.ts",
     "seed:policies": "tsx scripts/seed-policies.ts",
+    "seed:rules": "tsx scripts/seed-rules.ts",
     "mcp": "tsx src/mcp-server.ts"
   },
   "dependencies": {
