@@ -392,6 +392,56 @@ El 503 es el que más importa, y no es teórico: la base de datos de reglas se c
 
 Mi recomendación: mover 400, 429 y 503 a `HTTP 200` con `{ "error": "…" }`, y dejar el 500 para lo genuinamente inesperado. Es un cambio acotado al handler. **Pendiente de decisión del equipo.**
 
+#### Qué hay que escribir en el prompt de Lia
+
+Registrar la tool es la mitad del trabajo. Si el prompt no dice cuándo usarla y qué hacer con lo que devuelve, la capacidad existe y nadie la usa: no falla nada, simplemente no pasa nada.
+
+##### 🚨 Sobre qué flow se aplica
+
+Hay dos, y se parecen mucho:
+
+| Flow | ID | `status` | `isAutoResponse` | |
+|---|---|---|---|---|
+| `mesdessous ia claude` | `268e5730-8ba2-49e9-b2b5-4b99d077b7f5` | published | **true** | **PRODUCCIÓN** — le responde a clientes reales |
+| `mesdessous ia claude — test` | `e4304671-0815-4d08-9d95-c060da9235b9` | draft | false | Pruebas — duplicado de Lia |
+
+**Se aplica primero en el de pruebas.** Se verifica en el chat con casos reales, y solo entonces se pasa al de producción.
+
+Ojo con un detalle que engaña: **los dos tienen `isActive: true`**, así que ese campo no sirve para distinguirlos. Lo que de verdad separa producción de pruebas es `isAutoResponse`, que es el que hace que el flow conteste solo a un cliente.
+
+Y recordá que **guardar el prompt reemplaza el texto completo**: hay que leer el prompt entero, copiarlo, aplicar el cambio sobre esa copia y guardar el conjunto. Enviar solo el fragmento borra el resto.
+
+##### El fragmento
+
+Va **junto a las instrucciones de pedidos**, no en una sección general al final. Una regla lejos del contenido al que se aplica se ignora con frecuencia, y es el fallo más común y el menos evidente. Si el prompt de Lia está en francés, traducilo: mezclar idiomas hace que el agente los mezcle al responder.
+
+> **Pedidos**
+>
+> Cuando el cliente pregunte por un pedido suyo, llama a `order_lookup`. Nunca respondas sobre el estado de un pedido sin haberla llamado: no lo deduzcas de la conversación ni de lo que el cliente te cuente.
+>
+> Necesitas dos datos y debes pedírselos si no los ha dado: la referencia del pedido (9 letras y números) y el email asociado al pedido.
+>
+> **Antes de escribir, lee `conversation.messages`.** Son los últimos mensajes entre el cliente y la tienda. Si ya se le dijo algo, no lo repitas como si fuera nuevo, y si lo que se le prometió no coincide con los datos que tienes ahora, reconócelo en vez de ignorarlo.
+>
+> Si un mensaje trae `authorCertain: false`, no sabemos con seguridad quién lo escribió. **No atribuyas ese mensaje a nadie**: no digas "usted nos dijo" ni "le informamos", y no lo uses para afirmar que alguien ya respondió.
+>
+> Al responder:
+>
+> - Di únicamente lo que venga en `facts_to_convey`. Las fechas ya vienen escritas en formato francés: cópialas tal cual, no las recalcules.
+> - Respeta `must_not_claim` al pie de la letra. Son afirmaciones que en este caso concreto serían falsas.
+> - Si `must_escalate` es true, no des ningún estado del pedido. Discúlpate por la espera y deriva a una persona.
+> - Si la consulta falla o no devuelve nada, dilo y deriva. Nunca completes con lo que te parezca probable.
+>
+> Estos datos están disponibles si el cliente pregunta por ellos, pero **no los menciones si no los pide**:
+>
+> - `order.timeline` — desde cuándo el pedido está en su estado actual.
+> - `shipping.carrierDelay` — el plazo que promete el transportista.
+> - `order.deliveryAddress` — población y país, y el punto de recogida si lo hay. Nunca la calle: no la tienes.
+> - `refund.lines` — qué artículo concreto se abonó.
+> - `payment` — el medio de pago y los 4 últimos dígitos de la tarjeta, para decir dónde llegaría un reembolso.
+
+**No metas datos de tienda en este fragmento.** Plazos, política de devoluciones y horarios van a la base de conocimientos: si entran al prompt, hay que reescribirlo entero cada vez que cambia una fecha, y guardar el prompt reemplaza el texto completo.
+
 #### Lo que esta tool NO puede responder
 
 Hay que saberlo para no prometerlo:
