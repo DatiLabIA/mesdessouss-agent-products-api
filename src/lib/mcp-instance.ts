@@ -665,6 +665,92 @@ export function createMcpServer(): McpServer {
   //  MOTOR DE REGLAS DE PEDIDOS — VERIFICACIÓN Y PUBLICACIÓN
   // ═══════════════════════════════════════════════════════════════════════
 
+  // ─── get_order_status ────────────────────────────────────────────────────
+  //
+  // Hermana de `simulate_rules`, y no un duplicado: responden preguntas distintas.
+  // `simulate_rules` responde "¿qué regla disparó y por qué?" y sirve para afinar la
+  // matriz antes de publicar un borrador. Esta responde "¿qué pasa con el pedido de
+  // este cliente?" y sirve para atender una queja: devuelve el pedido consolidado
+  // entero —líneas, seguimiento, abonos, estado de la conversación— que la otra no
+  // trae. Es el mismo contenido que recibe DatiHub por HTTP, sin levantar un curl.
+  server.tool(
+    "get_order_status",
+    "Consulta el estado completo de un pedido real y devuelve lo mismo que recibe el agente por HTTP: el pedido consolidado (estado, líneas con marca y stock, número y enlace de seguimiento, abonos con su tipo vale/dinero, estado de la devolución, estado de la conversación) más el bloque guidance con lo que hay que decirle al cliente y lo que está prohibido afirmar. Solo lectura: no envía nada a nadie ni escribe en base. Úsala para investigar una consulta o una queja concreta ('¿qué le vamos a responder a quien pregunta por SURVHLYRI?'). Si lo que querés es afinar la matriz de decisión antes de publicar un borrador, usá simulate_rules en su lugar. Requiere referencia Y email: sin los dos no se entrega información.",
+    {
+      reference: z.string().describe("Referencia del pedido (9 caracteres alfanuméricos)."),
+      email: z.string().describe("Email asociado al pedido. Obligatorio: es la protección de datos personales, no un trámite."),
+    },
+    async ({ reference, email }) => {
+      const identity = await verifyOrderIdentity({ reference, email });
+      if (identity.outcome !== "VERIFIED") {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                identity.outcome === "IDENTITY_NOT_VERIFIED"
+                  ? "No se entrega información: la referencia no existe o el email no corresponde a ese pedido. Los dos casos dan la misma respuesta a propósito, para que nadie pueda averiguar qué referencias existen probando correos."
+                  : `No se pudo consultar el pedido: ${identity.outcome}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      try {
+        const ruleSet = await loadRuleSetForSimulation(CLIENT_ID);
+        const today = new Date();
+        const consolidated = await consolidateOrder(
+          { order: identity.order, customer: identity.customer, today },
+          ruleSet.stateGroups
+        );
+
+        const facts = computeOrderFacts(consolidated.facts, {
+          stateGroups: ruleSet.stateGroups,
+          brandLeadDays: ruleSet.brandLeadDays,
+          holidays: ruleSet.holidays,
+          inStockLeadDays: ruleSet.settings.inStockLeadDays,
+          shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+        });
+
+        const evaluation = evaluateRules(facts, ruleSet.decisions);
+        const guidance = buildGuidance(
+          evaluation,
+          facts,
+          consolidated.orderContext,
+          ruleSet.templates,
+          consolidated.extraContext
+        );
+
+        const payload = {
+          order: consolidated.order,
+          customer: consolidated.customer,
+          lines: consolidated.lines,
+          shipping: consolidated.shipping,
+          refund: consolidated.refund,
+          return: consolidated.return,
+          conversation: consolidated.conversation,
+          guidance,
+        };
+
+        return { content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`` }] };
+      } catch (err) {
+        if (err instanceof RuleSetNotFoundError || err instanceof RuleSetValidationError) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${err.message}\n\nMientras no haya un conjunto de reglas ACTIVO no se puede evaluar la consulta. Publicá uno con activate_rule_set.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        throw err;
+      }
+    }
+  );
+
   // ─── simulate_rules ──────────────────────────────────────────────────────
   server.tool(
     "simulate_rules",
