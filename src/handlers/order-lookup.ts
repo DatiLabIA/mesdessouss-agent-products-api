@@ -318,6 +318,15 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
             group: change.group,
             date: change.date,
           })),
+          // Dirección de entrega, sin calle ni número: dato personal de más en el contexto del
+          // modelo, y el agente no lo necesita para responder.
+          deliveryAddress: {
+            pickupPointName: consolidation.order.deliveryAddress.pickupPointName,
+            city: consolidation.order.deliveryAddress.city,
+            postcode: consolidation.order.deliveryAddress.postcode,
+            countryId: consolidation.order.deliveryAddress.countryId,
+            countryIso: consolidation.order.deliveryAddress.countryIso,
+          },
         },
         customer: {
           firstname: consolidation.customer.firstname,
@@ -349,6 +358,13 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
                 type: consolidation.refund.type,
                 voucherExpiresAt: consolidation.refund.voucherExpiresAt,
                 processedDate: consolidation.refund.processedDate,
+                // Qué líneas cubrió el avoir: sin esto el payload solo decía "se abonaron X €"
+                // sin poder decir de qué producto (caso real LLKVUZDZD, cuatro artículos).
+                lines: consolidation.refund.lines.map((line) => ({
+                  name: line.name,
+                  quantity: line.quantity,
+                  amount: line.amount,
+                })),
               },
         return: {
           dataAvailable: consolidation.return.dataAvailable,
@@ -372,6 +388,17 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
             threadId: message.threadId,
           })),
         },
+        // Responde "¿dónde me devuelven el dinero?": nunca la cadena enmascarada completa,
+        // solo los últimos 4 dígitos (ver `computePayment` en order-consolidation.ts).
+        payment:
+          consolidation.payment === null
+            ? null
+            : {
+                method: consolidation.payment.method,
+                cardLast4: consolidation.payment.cardLast4,
+                amount: consolidation.payment.amount,
+                date: consolidation.payment.date,
+              },
         guidance: {
           situation: guidance.situation,
           can_answer: guidance.can_answer,

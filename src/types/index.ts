@@ -180,6 +180,22 @@ export interface OrderLookupOrderView {
    * quieto y el estado actual por sí solo no dice nada.
    */
   timeline: OrderLookupStatusChangeView[];
+  /** Dirección de entrega, sin calle ni número: ver `OrderLookupAddressView`. */
+  deliveryAddress: OrderLookupAddressView;
+}
+
+/**
+ * Dirección de entrega, deliberadamente sin calle ni número: el agente no necesita el
+ * domicilio exacto para responder, y es un dato personal de más en el contexto de un modelo.
+ */
+export interface OrderLookupAddressView {
+  /** Alias del punto de recogida, o `null` si es entrega a domicilio. Ej: "COLISSIMO POINT PICKUP 24085". */
+  pickupPointName: string | null;
+  city: string;
+  postcode: string;
+  countryId: number;
+  /** Código ISO del país, ej. "FR", "BE". `null` si no se pudo resolver. */
+  countryIso: string | null;
 }
 
 export interface OrderLookupStatusChangeView {
@@ -220,6 +236,24 @@ export interface OrderLookupRefundView {
   type: "VOUCHER" | "MONEY";
   voucherExpiresAt: Date | null;
   processedDate: Date;
+  /** Qué líneas del pedido cubrió el reembolso. Puede quedar vacío (un avoir 100% de envío no tiene líneas). */
+  lines: OrderLookupRefundLineView[];
+}
+
+export interface OrderLookupRefundLineView {
+  /** `null` cuando la línea del avoir no cruza con ninguna línea del pedido: nunca se descarta en silencio. */
+  name: string | null;
+  quantity: number;
+  amount: number;
+}
+
+/** `null` cuando el pedido no tiene ningún pago registrado. */
+export interface OrderLookupPaymentView {
+  method: string | null;
+  /** Últimos 4 dígitos de la tarjeta, o `null` si no fue tarjeta. NUNCA el número completo. */
+  cardLast4: string | null;
+  amount: number;
+  date: Date | null;
 }
 
 export interface OrderLookupReturnView {
@@ -287,6 +321,8 @@ export interface OrderLookupSuccessResponse {
   refund: OrderLookupRefundView | null;
   return: OrderLookupReturnView;
   conversation: OrderLookupConversationView;
+  /** `null` cuando el pedido no tiene ningún pago registrado en `order_payments`. */
+  payment: OrderLookupPaymentView | null;
   guidance: OrderLookupGuidanceView;
 }
 

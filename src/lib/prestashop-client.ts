@@ -135,6 +135,16 @@ export interface PrestashopQueryParams {
   filter?: Record<string, PrestashopFilterValue>;
   /** Whitelist de campos a devolver. Sin `display`, PrestaShop solo devuelve el `id`. */
   display?: readonly string[];
+  /**
+   * Fuerza el literal `display=full`, ignorando `display`. Único caso verificado que lo
+   * necesita: `order_slip`, para traer `associations.order_slip_details` (qué líneas cubre
+   * un avoir). Verificado contra la API real: pedir esa asociación como campo dentro de
+   * `display=[...]` (con o sin el prefijo `associations.`) no da error ni datos — cuelga la
+   * petición hasta un timeout de gateway (probado con 60s), mientras que el literal
+   * `display=full` responde en <1s con la forma completa, asociación incluida. No usar por
+   * defecto: `display=full` también trae campos que la whitelist excluye a propósito.
+   */
+  displayFull?: boolean;
   /** Orden, ej. `"id_DESC"`. Se serializa como `sort=[id_DESC]`. */
   sort?: string;
   /** Límite de resultados: `"count"` o `"offset,count"`. */
@@ -160,7 +170,9 @@ function buildQueryString(params: PrestashopQueryParams): string {
     }
   }
 
-  if (params.display && params.display.length > 0) {
+  if (params.displayFull) {
+    parts.push("display=full");
+  } else if (params.display && params.display.length > 0) {
     parts.push(`display=[${params.display.join(",")}]`);
   }
 

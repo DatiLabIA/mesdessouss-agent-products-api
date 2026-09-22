@@ -25,6 +25,11 @@ const STATE_GROUPS: Map<number, StateGroup> = new Map([
   [STATE_B, "B"],
 ]);
 
+// Dirección de entrega por defecto: entrega a domicilio (misma id que `id_address_invoice`,
+// alias genérico), para que los tests que no prueban dirección no necesiten pensarla.
+const DELIVERY_ADDRESS_ID = 1000;
+const DEFAULT_COUNTRY_ID = 8; // FR, igual id verificado contra la API real.
+
 // `today` fija, nunca `new Date()`: igual convención que `OrderFactsInput.today`.
 const TODAY = new Date(Date.UTC(2026, 8, 21, 12, 0, 0));
 
@@ -85,6 +90,9 @@ interface Routes {
   orderSlip: RouteResponse;
   customerMessages: RouteResponse;
   cartRules: RouteResponse;
+  addresses: Record<number, RouteResponse>;
+  countries: Record<number, RouteResponse>;
+  orderPayments: RouteResponse;
 }
 
 function emptyCollection(key: string): string {
@@ -101,6 +109,9 @@ const DEFAULT_ORDER_HEADER_BODY = JSON.stringify({
       total_paid_tax_incl: "49.90",
       total_shipping_tax_incl: "4.90",
       shipping_number: null,
+      // Por defecto, entrega a domicilio: misma id que `id_address_invoice`.
+      id_address_delivery: DELIVERY_ADDRESS_ID,
+      id_address_invoice: DELIVERY_ADDRESS_ID,
     },
   ],
 });
@@ -116,6 +127,13 @@ const DEFAULT_PRODUCTS_BODY = JSON.stringify({ products: [{ id: 100, manufacture
 const DEFAULT_STOCK_BODY = JSON.stringify({
   stock_availables: [{ id: 1, id_product: 100, id_product_attribute: 0, quantity: "5" }],
 });
+// Alias genérico verificado: entrega a domicilio, nunca punto de recogida.
+const DEFAULT_ADDRESS_BODY = JSON.stringify({
+  addresses: [
+    { id: DELIVERY_ADDRESS_ID, alias: "Mon adresse", company: "", city: "Paris", postcode: "75001", id_country: DEFAULT_COUNTRY_ID },
+  ],
+});
+const DEFAULT_COUNTRY_BODY = JSON.stringify({ countries: [{ id: DEFAULT_COUNTRY_ID, iso_code: "FR" }] });
 
 const DEFAULTS: Routes = {
   orderHeader: { body: DEFAULT_ORDER_HEADER_BODY },
@@ -131,6 +149,9 @@ const DEFAULTS: Routes = {
   orderSlip: { body: emptyCollection("order_slips") },
   customerMessages: { body: emptyCollection("customer_messages") },
   cartRules: { body: emptyCollection("cart_rules") },
+  addresses: { [DELIVERY_ADDRESS_ID]: { body: DEFAULT_ADDRESS_BODY } },
+  countries: { [DEFAULT_COUNTRY_ID]: { body: DEFAULT_COUNTRY_BODY } },
+  orderPayments: { body: emptyCollection("order_payments") },
 };
 
 const realFetch = globalThis.fetch;
@@ -152,6 +173,8 @@ function stub(overrides: Partial<Routes> = {}): void {
     ...DEFAULTS,
     ...overrides,
     carriers: { ...DEFAULTS.carriers, ...(overrides.carriers ?? {}) },
+    addresses: { ...DEFAULTS.addresses, ...(overrides.addresses ?? {}) },
+    countries: { ...DEFAULTS.countries, ...(overrides.countries ?? {}) },
   };
 
   globalThis.fetch = (async (input: string | URL | Request) => {
@@ -170,6 +193,13 @@ function stub(overrides: Partial<Routes> = {}): void {
     if (/\/order_histories\?/.test(url)) return respond(routes.orderHistories, url);
     if (/\/customer_threads\?/.test(url)) return respond(routes.customerThreads, url);
     if (/\/order_slip\?/.test(url)) return respond(routes.orderSlip, url);
+    if (/\/order_payments\?/.test(url)) return respond(routes.orderPayments, url);
+
+    const addressMatch = url.match(/\/addresses\/(\d+)\?/);
+    if (addressMatch) return respond(routes.addresses[Number(addressMatch[1])], url);
+
+    const countryMatch = url.match(/\/countries\/(\d+)\?/);
+    if (countryMatch) return respond(routes.countries[Number(countryMatch[1])], url);
     if (/\/customer_messages\?/.test(url)) return respond(routes.customerMessages, url);
     if (/\/cart_rules\?/.test(url)) return respond(routes.cartRules, url);
 
@@ -197,6 +227,8 @@ describe("consolidateOrder — camino feliz", () => {
               total_paid_tax_incl: "49.90",
               total_shipping_tax_incl: "4.90",
               shipping_number: "8Q004677948",
+              id_address_delivery: DELIVERY_ADDRESS_ID,
+              id_address_invoice: DELIVERY_ADDRESS_ID,
             },
           ],
         }),
@@ -292,6 +324,8 @@ describe("consolidateOrder — tracking en dos fuentes", () => {
               total_paid_tax_incl: "49.90",
               total_shipping_tax_incl: "4.90",
               shipping_number: "PRIORITARIO1",
+              id_address_delivery: DELIVERY_ADDRESS_ID,
+              id_address_invoice: DELIVERY_ADDRESS_ID,
             },
           ],
         }),
@@ -328,6 +362,8 @@ describe("consolidateOrder — tracking en dos fuentes", () => {
               total_paid_tax_incl: "49.90",
               total_shipping_tax_incl: "4.90",
               shipping_number: "   ",
+              id_address_delivery: DELIVERY_ADDRESS_ID,
+              id_address_invoice: DELIVERY_ADDRESS_ID,
             },
           ],
         }),
@@ -915,5 +951,425 @@ describe("consolidateOrder — carrierDelay", () => {
     stub();
     const result = await consolidateOrder(buildInput(), STATE_GROUPS);
     assert.equal(result.shipping.carrierDelay, null);
+  });
+});
+
+// ─── Dirección de entrega ────────────────────────────────────────────────
+
+describe("consolidateOrder — dirección de entrega", () => {
+  const PICKUP_ADDRESS_ID = 2000;
+  const PICKUP_INVOICE_ADDRESS_ID = 2001; // distinta de PICKUP_ADDRESS_ID: candidato a relay.
+  const BELGIUM_COUNTRY_ID = 3;
+
+  test("punto de recogida (alias no genérico + entrega distinta de facturación): pickupPointName usa company", async () => {
+    stub({
+      orderHeader: {
+        body: JSON.stringify({
+          orders: [
+            {
+              id: ORDER_ID,
+              reference: REFERENCE,
+              date_add: "2026-08-27 23:42:20",
+              total_paid: "49.90",
+              total_paid_tax_incl: "49.90",
+              total_shipping_tax_incl: "4.90",
+              shipping_number: null,
+              id_address_delivery: PICKUP_ADDRESS_ID,
+              id_address_invoice: PICKUP_INVOICE_ADDRESS_ID,
+            },
+          ],
+        }),
+      },
+      addresses: {
+        [PICKUP_ADDRESS_ID]: {
+          body: JSON.stringify({
+            addresses: [
+              {
+                id: PICKUP_ADDRESS_ID,
+                alias: "COLISSIMO POINT PICKUP 24085",
+                company: "TOTAL CHANT D'OISEAU",
+                city: "WOLUWE SAINT PIERRE",
+                postcode: "1150",
+                id_country: BELGIUM_COUNTRY_ID,
+              },
+            ],
+          }),
+        },
+      },
+      countries: {
+        [BELGIUM_COUNTRY_ID]: { body: JSON.stringify({ countries: [{ id: BELGIUM_COUNTRY_ID, iso_code: "BE" }] }) },
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.order.deliveryAddress.pickupPointName, "TOTAL CHANT D'OISEAU");
+    assert.equal(result.order.deliveryAddress.city, "WOLUWE SAINT PIERRE");
+    assert.equal(result.order.deliveryAddress.postcode, "1150");
+    assert.equal(result.order.deliveryAddress.countryId, BELGIUM_COUNTRY_ID);
+    assert.equal(result.order.deliveryAddress.countryIso, "BE");
+  });
+
+  test("punto de recogida sin company: pickupPointName cae al alias", async () => {
+    stub({
+      orderHeader: {
+        body: JSON.stringify({
+          orders: [
+            {
+              id: ORDER_ID,
+              reference: REFERENCE,
+              date_add: "2026-08-27 23:42:20",
+              total_paid: "49.90",
+              total_paid_tax_incl: "49.90",
+              total_shipping_tax_incl: "4.90",
+              shipping_number: null,
+              id_address_delivery: PICKUP_ADDRESS_ID,
+              id_address_invoice: PICKUP_INVOICE_ADDRESS_ID,
+            },
+          ],
+        }),
+      },
+      addresses: {
+        [PICKUP_ADDRESS_ID]: {
+          body: JSON.stringify({
+            addresses: [
+              {
+                id: PICKUP_ADDRESS_ID,
+                alias: "Point ChronoRelais 130BX",
+                company: "",
+                city: "LA SEYNE SUR MER",
+                postcode: "83500",
+                id_country: DEFAULT_COUNTRY_ID,
+              },
+            ],
+          }),
+        },
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.order.deliveryAddress.pickupPointName, "Point ChronoRelais 130BX");
+  });
+
+  test("entrega a domicilio (alias genérico 'Mon adresse'): pickupPointName null", async () => {
+    stub(); // valores por defecto: DELIVERY_ADDRESS_ID, alias "Mon adresse", misma id que invoice.
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.order.deliveryAddress.pickupPointName, null);
+    assert.equal(result.order.deliveryAddress.countryIso, "FR");
+  });
+
+  test("id_address_delivery distinto de invoice pero alias genérico ('Mi dirección'): sigue siendo domicilio", async () => {
+    stub({
+      orderHeader: {
+        body: JSON.stringify({
+          orders: [
+            {
+              id: ORDER_ID,
+              reference: REFERENCE,
+              date_add: "2026-08-27 23:42:20",
+              total_paid: "49.90",
+              total_paid_tax_incl: "49.90",
+              total_shipping_tax_incl: "4.90",
+              shipping_number: null,
+              id_address_delivery: PICKUP_ADDRESS_ID,
+              id_address_invoice: PICKUP_INVOICE_ADDRESS_ID,
+            },
+          ],
+        }),
+      },
+      addresses: {
+        [PICKUP_ADDRESS_ID]: {
+          body: JSON.stringify({
+            addresses: [
+              {
+                id: PICKUP_ADDRESS_ID,
+                alias: "Mi dirección",
+                company: "",
+                city: "Madrid",
+                postcode: "28001",
+                id_country: DEFAULT_COUNTRY_ID,
+              },
+            ],
+          }),
+        },
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.order.deliveryAddress.pickupPointName, null);
+  });
+
+  test("la calle nunca aparece en el payload, ni siquiera si la API la incluyera en la respuesta", async () => {
+    const STREET_LEAK = "12 rue de la Fuite Interdite";
+    stub({
+      orderHeader: {
+        body: JSON.stringify({
+          orders: [
+            {
+              id: ORDER_ID,
+              reference: REFERENCE,
+              date_add: "2026-08-27 23:42:20",
+              total_paid: "49.90",
+              total_paid_tax_incl: "49.90",
+              total_shipping_tax_incl: "4.90",
+              shipping_number: null,
+              id_address_delivery: PICKUP_ADDRESS_ID,
+              id_address_invoice: PICKUP_INVOICE_ADDRESS_ID,
+            },
+          ],
+        }),
+      },
+      addresses: {
+        [PICKUP_ADDRESS_ID]: {
+          // La API real nunca debería devolver `address1` porque no se pide en `display`, pero el
+          // test simula que lo hiciera igual: el código no debe leerlo ni propagarlo.
+          body: JSON.stringify({
+            addresses: [
+              {
+                id: PICKUP_ADDRESS_ID,
+                alias: "Point ChronoRelais 130BX",
+                company: "Consigne Car Wash Vignelongue",
+                city: "LA SEYNE SUR MER",
+                postcode: "83500",
+                id_country: DEFAULT_COUNTRY_ID,
+                address1: STREET_LEAK,
+                address2: "",
+              },
+            ],
+          }),
+        },
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.deepEqual(Object.keys(result.order.deliveryAddress).sort(), [
+      "city",
+      "countryId",
+      "countryIso",
+      "pickupPointName",
+      "postcode",
+    ]);
+    assert.ok(!JSON.stringify(result).includes(STREET_LEAK), "la calle nunca debe viajar en el payload consolidado");
+  });
+});
+
+// ─── countryIso: caché en memoria por proceso ─────────────────────────────
+
+describe("consolidateOrder — countryIso cacheado", () => {
+  test("dos consultas que resuelven el mismo país solo piden countries una vez", async () => {
+    const CACHE_ADDRESS_ID = 4000;
+    const CACHE_COUNTRY_ID = 77; // id no usado por ningún otro test del fichero.
+
+    stub({
+      orderHeader: {
+        body: JSON.stringify({
+          orders: [
+            {
+              id: ORDER_ID,
+              reference: REFERENCE,
+              date_add: "2026-08-27 23:42:20",
+              total_paid: "49.90",
+              total_paid_tax_incl: "49.90",
+              total_shipping_tax_incl: "4.90",
+              shipping_number: null,
+              id_address_delivery: CACHE_ADDRESS_ID,
+              id_address_invoice: CACHE_ADDRESS_ID,
+            },
+          ],
+        }),
+      },
+      addresses: {
+        [CACHE_ADDRESS_ID]: {
+          body: JSON.stringify({
+            addresses: [
+              { id: CACHE_ADDRESS_ID, alias: "Mon adresse", company: "", city: "Lyon", postcode: "69000", id_country: CACHE_COUNTRY_ID },
+            ],
+          }),
+        },
+      },
+      countries: {
+        [CACHE_COUNTRY_ID]: { body: JSON.stringify({ countries: [{ id: CACHE_COUNTRY_ID, iso_code: "ZZ" }] }) },
+      },
+    });
+
+    let countryFetchCount = 0;
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (/\/countries\/\d+\?/.test(String(input))) countryFetchCount++;
+      return stubbedFetch(input as never);
+    }) as typeof fetch;
+
+    const first = await consolidateOrder(buildInput(), STATE_GROUPS);
+    const second = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(first.order.deliveryAddress.countryIso, "ZZ");
+    assert.equal(second.order.deliveryAddress.countryIso, "ZZ");
+    assert.equal(countryFetchCount, 1, "countries/{id} debe consultarse una sola vez por proceso para el mismo país");
+  });
+});
+
+// ─── Reembolso: qué líneas cubrió ─────────────────────────────────────────
+
+describe("consolidateOrder — refund.lines", () => {
+  test("cruza id_order_detail (string) con el nombre real de la línea del pedido", async () => {
+    stub({
+      orderDetails: {
+        body: JSON.stringify({
+          order_details: [
+            { id: 1, product_id: 100, product_attribute_id: 0, product_name: "Soutien-gorge corbeille", product_quantity: "1" },
+            { id: 2, product_id: 200, product_attribute_id: 0, product_name: "Culotte assortie", product_quantity: "1" },
+          ],
+        }),
+      },
+      orderSlip: {
+        body: JSON.stringify({
+          order_slips: [
+            {
+              id: 90,
+              id_order: ORDER_ID,
+              total_products_tax_incl: "45.00",
+              total_shipping_tax_incl: "0.00",
+              date_add: "2026-09-10 12:00:00",
+              associations: {
+                order_slip_details: [
+                  { id_order_detail: 1, product_quantity: "1", amount_tax_incl: "30.00" },
+                  // `id_order_detail` como string: mismo patrón verificado id_* de toda la API.
+                  { id_order_detail: "2", product_quantity: "1", amount_tax_incl: "15.00" },
+                ],
+              },
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.ok(result.refund);
+    assert.equal(result.refund?.lines.length, 2);
+    assert.deepEqual(
+      result.refund?.lines.map((l) => l.name),
+      ["Soutien-gorge corbeille", "Culotte assortie"]
+    );
+    assert.equal(result.refund?.lines[0].quantity, 1);
+    assert.equal(result.refund?.lines[0].amount, 30);
+    assert.equal(result.refund?.lines[1].amount, 15);
+  });
+
+  test("un id_order_detail que no aparece entre las líneas del pedido se incluye con name: null, no se descarta", async () => {
+    stub({
+      orderSlip: {
+        body: JSON.stringify({
+          order_slips: [
+            {
+              id: 91,
+              id_order: ORDER_ID,
+              total_products_tax_incl: "20.00",
+              total_shipping_tax_incl: "0.00",
+              date_add: "2026-09-10 12:00:00",
+              associations: {
+                order_slip_details: [{ id_order_detail: 9999, product_quantity: "1", amount_tax_incl: "20.00" }],
+              },
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.ok(result.refund);
+    assert.equal(result.refund?.lines.length, 1);
+    assert.equal(result.refund?.lines[0].name, null);
+    assert.equal(result.refund?.lines[0].amount, 20);
+  });
+
+  test("un avoir 100% de envío (sin associations en la respuesta) no aporta ninguna línea", async () => {
+    stub({
+      orderSlip: {
+        body: JSON.stringify({
+          order_slips: [
+            {
+              id: 92,
+              id_order: ORDER_ID,
+              total_products_tax_incl: "0.00",
+              total_shipping_tax_incl: "4.90",
+              date_add: "2026-09-16 12:00:00",
+              // Sin `associations`: verificado contra la API real (pedido 705570, avoir 72384).
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.ok(result.refund);
+    assert.deepEqual(result.refund?.lines, []);
+  });
+});
+
+// ─── Pago ──────────────────────────────────────────────────────────────────
+
+describe("consolidateOrder — payment", () => {
+  test("pago con tarjeta: cardLast4 son los últimos 4, la cadena enmascarada completa nunca viaja en el payload", async () => {
+    stub({
+      orderPayments: {
+        body: JSON.stringify({
+          order_payments: [
+            {
+              id: 753062,
+              amount: "352.920000",
+              payment_method: "Paiement CB",
+              card_number: "497355XXXXXX8929",
+              date_add: "2026-08-27 23:41:40",
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.ok(result.payment);
+    assert.equal(result.payment?.method, "Paiement CB");
+    assert.equal(result.payment?.cardLast4, "8929");
+    assert.equal(result.payment?.amount, 352.92);
+    assert.equal(result.payment?.date?.toISOString(), new Date("2026-08-27T23:41:40Z").toISOString());
+
+    const serialized = JSON.stringify(result);
+    assert.ok(!serialized.includes("497355XXXXXX8929"), "el número enmascarado completo nunca debe viajar en el payload");
+    assert.ok(!serialized.includes("XXXXXX"), "ninguna forma enmascarada del número debe aparecer en el payload");
+  });
+
+  test("pago sin tarjeta (PayPal, card_number vacío): cardLast4 null", async () => {
+    stub({
+      orderPayments: {
+        body: JSON.stringify({
+          order_payments: [
+            { id: 1, amount: "50.00", payment_method: "PayPal", card_number: "", date_add: "2026-09-01 10:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.ok(result.payment);
+    assert.equal(result.payment?.cardLast4, null);
+    assert.equal(result.payment?.method, "PayPal");
+  });
+
+  test("sin ningún pago registrado, payment es null", async () => {
+    stub();
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.payment, null);
   });
 });

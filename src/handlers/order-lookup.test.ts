@@ -49,6 +49,9 @@ const CUSTOMER_BODY = JSON.stringify({
 
 const EMPTY_THREADS_BODY = JSON.stringify({ customer_threads: [] });
 
+const DELIVERY_ADDRESS_ID = 1000;
+const DEFAULT_COUNTRY_ID = 8; // FR, igual id verificado contra la API real.
+
 const ORDER_HEADER_BODY = JSON.stringify({
   orders: [
     {
@@ -59,6 +62,8 @@ const ORDER_HEADER_BODY = JSON.stringify({
       total_paid_tax_incl: "49.90",
       total_shipping_tax_incl: "4.90",
       shipping_number: null,
+      id_address_delivery: DELIVERY_ADDRESS_ID,
+      id_address_invoice: DELIVERY_ADDRESS_ID,
     },
   ],
 });
@@ -74,6 +79,12 @@ const PRODUCTS_BODY = JSON.stringify({ products: [{ id: 100, manufacturer_name: 
 const STOCK_BODY = JSON.stringify({
   stock_availables: [{ id: 1, id_product: 100, id_product_attribute: 0, quantity: "5" }],
 });
+const ADDRESS_BODY = JSON.stringify({
+  addresses: [
+    { id: DELIVERY_ADDRESS_ID, alias: "Mon adresse", company: "", city: "Paris", postcode: "75001", id_country: DEFAULT_COUNTRY_ID },
+  ],
+});
+const COUNTRY_BODY = JSON.stringify({ countries: [{ id: DEFAULT_COUNTRY_ID, iso_code: "FR" }] });
 
 function emptyCollection(key: string): string {
   return JSON.stringify({ [key]: [] });
@@ -117,6 +128,9 @@ function stubHappyPath(): void {
     { when: /\/order_slip\?/, body: emptyCollection("order_slips") },
     { when: /\/customer_messages\?/, body: emptyCollection("customer_messages") },
     { when: /\/cart_rules\?/, body: emptyCollection("cart_rules") },
+    { when: /\/addresses\/\d+\?/, body: ADDRESS_BODY },
+    { when: /\/countries\/\d+\?/, body: COUNTRY_BODY },
+    { when: /\/order_payments\?/, body: emptyCollection("order_payments") },
   ]);
 }
 

@@ -46,6 +46,13 @@ interface OrderHeaderRecord {
   total_shipping_tax_incl: string | number;
   /** Vive también en `order_carriers.tracking_number`; se toma el primero con contenido real. */
   shipping_number: string | null;
+  /** Dirección de entrega (`addresses.id`). `id_*`, viaja como string: normalizar con `toNumericId`. */
+  id_address_delivery: string | number;
+  /**
+   * Dirección de facturación. Solo se usa para compararla contra `id_address_delivery`: cuando
+   * difieren, el pedido es candidato a punto de recogida (§ decisión de `computeDeliveryAddress`).
+   */
+  id_address_invoice: string | number;
 }
 
 /**
@@ -124,12 +131,28 @@ interface CustomerThreadRecord {
   date_upd: string;
 }
 
+/** Una línea de un avoir (`order_slip.associations.order_slip_details`). Solo viaja con `displayFull`. */
+interface OrderSlipDetailRecord {
+  /** `order_details.id` de la línea del pedido cubierta por el avoir. `id_*`, viaja como string. */
+  id_order_detail: string | number;
+  product_quantity: string | number;
+  amount_tax_incl: string | number;
+}
+
 interface OrderSlipRecord {
   id: number;
   id_order: number;
   total_products_tax_incl: string | number;
   total_shipping_tax_incl: string | number;
   date_add: string;
+  /**
+   * Solo presente con `displayFull` (ver esa constante en `PrestashopQueryParams`), y solo
+   * cuando el avoir cubre productos: un avoir 100% de envío (verificado en el pedido 705570,
+   * avoir 72384) no trae esta clave en absoluto.
+   */
+  associations?: {
+    order_slip_details?: OrderSlipDetailRecord[];
+  };
 }
 
 interface CustomerMessageRecord {
@@ -147,6 +170,36 @@ interface CartRuleRecord {
   /** `"0000-00-00 00:00:00"` cuando el vale no caduca: `parsePrestashopDate` lo trata como `null`. */
   date_to: string;
   active: string | boolean;
+}
+
+/**
+ * Dirección de entrega (`addresses/{id}`). A propósito NUNCA se piden `address1`/`address2`
+ * (la calle y el número): el agente no necesita el domicilio exacto para responder, y es un
+ * dato personal de más en el contexto de un modelo. Con `city`/`postcode`/país y, si aplica,
+ * el nombre del punto de recogida, alcanza.
+ */
+interface AddressRecord {
+  id: number;
+  alias: string;
+  company: string | null;
+  city: string;
+  postcode: string;
+  /** `id_*`, viaja como string: normalizar con `toNumericId`. */
+  id_country: string | number;
+}
+
+interface CountryRecord {
+  id: number;
+  iso_code: string;
+}
+
+interface OrderPaymentRecord {
+  id: number;
+  amount: string | number;
+  payment_method: string;
+  /** Enmascarado por PrestaShop (ej. `"497355XXXXXX8929"`). Solo se conservan los últimos 4. */
+  card_number: string | null;
+  date_add: string;
 }
 
 // ─── Whitelists (`display=[...]`) ────────────────────────────────────────
@@ -167,6 +220,8 @@ const ORDER_HEADER_FIELDS = [
   "total_paid_tax_incl",
   "total_shipping_tax_incl",
   "shipping_number",
+  "id_address_delivery",
+  "id_address_invoice",
 ] as const;
 
 const ORDER_STATE_FIELDS = ["id", "name"] as const;
@@ -177,9 +232,14 @@ const ORDER_CARRIER_FIELDS = ["id", "id_order", "id_carrier", "tracking_number"]
 const CARRIER_FIELDS = ["id", "name", "url", "delay"] as const;
 const ORDER_HISTORY_FIELDS = ["id", "id_order_state", "date_add"] as const;
 const CUSTOMER_THREAD_FIELDS = ["id", "id_order", "email", "status", "date_add", "date_upd"] as const;
-const ORDER_SLIP_FIELDS = ["id", "id_order", "total_products_tax_incl", "total_shipping_tax_incl", "date_add"] as const;
+// `order_slip` ya no usa una whitelist de `display=[...]`: se pide con `displayFull` (ver esa
+// constante en `PrestashopQueryParams`), la única forma verificada de traer
+// `associations.order_slip_details` sin colgar la petición.
 const CUSTOMER_MESSAGE_FIELDS = ["id", "id_customer_thread", "id_employee", "message", "date_add"] as const;
 const CART_RULE_FIELDS = ["id", "code", "date_to", "active"] as const;
+const ADDRESS_FIELDS = ["id", "alias", "company", "city", "postcode", "id_country"] as const;
+const COUNTRY_FIELDS = ["id", "iso_code"] as const;
+const ORDER_PAYMENT_FIELDS = ["id", "amount", "payment_method", "card_number", "date_add"] as const;
 
 /** Estado 61 "Retour Terminé": la única señal fiable de retorno físico completado (§ hallazgos de la tarea). */
 const RETURN_COMPLETED_STATE_ID = 61;
@@ -209,6 +269,15 @@ const PAYMENT_MODULE_NOTE_PREFIX = "Action successfully completed";
 
 /** Un mensaje de conversación real no es cliente esperando > este umbral. */
 const AWAITING_REPLY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Alias verificados de "mi dirección" (entrega a domicilio genérica), normalizados sin acentos
+ * y en minúsculas con `normalizeForMatch` antes de comparar. Solo los dos verificados contra la
+ * API real (tabla `addresses`): no se inventan variantes de otros idiomas sin comprobar. Un
+ * alias que no matchea ninguno de estos, en un pedido a relay (`id_address_delivery !==
+ * id_address_invoice`), se toma como el nombre del punto de recogida.
+ */
+const GENERIC_ADDRESS_ALIASES = new Set(["mon adresse", "mi direccion"]);
 
 // ─── Helpers de bajo nivel ────────────────────────────────────────────────
 
@@ -378,6 +447,22 @@ export interface ConsolidatedOrder {
   currency: string;
   /** Historial de cambios de estado (`order_histories`), ordenado cronológicamente ascendente. */
   timeline: ConsolidatedStatusChange[];
+  /** Dirección de entrega, sin calle ni número (ver `ConsolidatedAddress`). */
+  deliveryAddress: ConsolidatedAddress;
+}
+
+/**
+ * Dirección de entrega, deliberadamente sin calle ni número: el agente no necesita el domicilio
+ * exacto para responder, y es un dato personal de más en el contexto de un modelo.
+ */
+export interface ConsolidatedAddress {
+  /** Alias del punto de recogida, o `null` si es entrega a domicilio. Ej: "COLISSIMO POINT PICKUP 24085". */
+  pickupPointName: string | null;
+  city: string;
+  postcode: string;
+  countryId: number;
+  /** Código ISO del país (`countries.iso_code`), ej. "FR", "BE". `null` si no se pudo resolver. */
+  countryIso: string | null;
 }
 
 /** Nunca lleva campos sensibles (`passwd`, `secure_key`, etc.): ya vienen filtrados desde `VerifiedCustomerData`. */
@@ -425,6 +510,20 @@ export interface ConsolidatedRefund {
   voucherExpiresAt: Date | null;
   /** Fecha del avoir más reciente (`order_slip.date_add`). */
   processedDate: Date;
+  /**
+   * Qué líneas del pedido cubrió cada avoir, cruzado por `id_order_detail`. Puede quedar vacío
+   * (un avoir 100% de envío no tiene líneas asociadas). El prompt de la tarea tipa `name` como
+   * `string`, pero su propio texto pide `name: null` cuando la línea no cruza: se resuelve la
+   * contradicción a favor del texto, que es más específico.
+   */
+  lines: ConsolidatedRefundLine[];
+}
+
+export interface ConsolidatedRefundLine {
+  /** `null` cuando `id_order_detail` no aparece entre las líneas del pedido: nunca se descarta la línea. */
+  name: string | null;
+  quantity: number;
+  amount: number;
 }
 
 export interface ConsolidatedReturn {
@@ -467,6 +566,15 @@ export interface ConsolidatedConversation {
   messages: ConsolidatedMessage[];
 }
 
+export interface ConsolidatedPayment {
+  /** `order_payments.payment_method` (ej. "Paiement CB", "PayPal"). `null` si viene vacío. */
+  method: string | null;
+  /** Últimos 4 dígitos de `card_number`, o `null` si no fue tarjeta (o no hay pago). NUNCA el número completo, ni siquiera enmascarado. */
+  cardLast4: string | null;
+  amount: number;
+  date: Date | null;
+}
+
 export interface OrderConsolidationResult {
   order: ConsolidatedOrder;
   customer: ConsolidatedCustomer;
@@ -476,6 +584,8 @@ export interface OrderConsolidationResult {
   refund: ConsolidatedRefund | null;
   return: ConsolidatedReturn;
   conversation: ConsolidatedConversation;
+  /** `null` cuando el pedido no tiene ningún pago registrado en `order_payments`. */
+  payment: ConsolidatedPayment | null;
   /** Listo para pasar a `computeOrderFacts` junto con el `OrderFactsConfig` que cargue el handler. */
   facts: OrderFactsInput;
   /** Listo para pasar a `buildGuidance` junto con la evaluación de la matriz. */
@@ -652,6 +762,132 @@ function computeShipping(
   };
 }
 
+// ─── Dirección de entrega ───────────────────────────────────────────────
+
+/** Trae `addresses/{id}` tolerando que ya no exista (404): degrada, igual que `fetchCarrierSafe`. */
+async function fetchAddressSafe(id: number): Promise<AddressRecord | null> {
+  try {
+    return await getOne<AddressRecord>("addresses", id, { display: ADDRESS_FIELDS });
+  } catch (err) {
+    if (err instanceof PrestashopNotFoundError) return null;
+    throw err;
+  }
+}
+
+/** `true` si `alias` (ya con contenido real) es uno de los genéricos verificados de "mi dirección". */
+function isGenericAddressAlias(alias: string): boolean {
+  return GENERIC_ADDRESS_ALIASES.has(normalizeForMatch(alias).trim());
+}
+
+/**
+ * Caché en memoria, por proceso, de `countries.id -> iso_code`: los países no cambian y no tiene
+ * sentido repetir la consulta para dos pedidos (o dos líneas) del mismo país. Solo se cachea un
+ * resultado definitivo (éxito o "no existe"); un fallo transitorio nunca se cachea, para que el
+ * próximo pedido lo reintente en vez de quedar con `null` pegado por una caída puntual de la API.
+ */
+const countryIsoCache = new Map<number, string | null>();
+
+/** Resuelve `countries/{id}.iso_code`, cacheado por id durante el proceso. */
+async function getCountryIso(countryId: number): Promise<string | null> {
+  if (countryIsoCache.has(countryId)) return countryIsoCache.get(countryId) ?? null;
+
+  let iso: string | null;
+  try {
+    const country = await getOne<CountryRecord>("countries", countryId, { display: COUNTRY_FIELDS });
+    iso = isBlank(country.iso_code) ? null : country.iso_code.trim();
+  } catch (err) {
+    if (!(err instanceof PrestashopNotFoundError)) throw err;
+    iso = null;
+  }
+
+  countryIsoCache.set(countryId, iso);
+  return iso;
+}
+
+/**
+ * Colapsa las barras invertidas sobrantes delante de comillas y apóstrofos.
+ *
+ * PrestaShop devuelve algunos textos sobre-escapados: el punto de recogida de un
+ * pedido real llega como `TOTAL CHANT D\\\'OISEAU` cuando su nombre es
+ * `TOTAL CHANT D'OISEAU`. No es inventar un dato, es deshacer un escape que la API
+ * aplicó de más — y este texto lo lee un modelo que puede repetírselo al cliente.
+ */
+function unescapeApiText(value: string): string {
+  return value.replace(/\\+(?=['"])/g, "");
+}
+
+
+/**
+ * Resuelve la dirección de entrega consolidada. Nunca expone calle ni número (la whitelist de
+ * `ADDRESS_FIELDS` ya los excluye): con población, código postal, país y, si aplica, el nombre
+ * del punto de recogida alcanza para todo lo que se pregunta.
+ *
+ * Detección de punto de recogida (verificado contra pedidos reales: KKWNDFPHA en Bélgica,
+ * "COLISSIMO POINT PICKUP 24085"/"TOTAL CHANT D'OISEAU"; LLKVUZDZD en Francia, "Point
+ * ChronoRelais 130BX"/"Consigne Car Wash Vignelongue"): el pedido debe ser candidato a relay
+ * (`id_address_delivery !== id_address_invoice`) Y el alias no debe ser uno de los genéricos de
+ * "mi dirección". Sin la primera condición, una dirección de regalo con un alias cualquiera
+ * ("Chez mamie") se leería como punto de recogida; sin la segunda, toda entrega a una dirección
+ * distinta de la de facturación (un regalo real) se leería como relay. El nombre a mostrar
+ * prefiere `company` (el nombre comercial del punto) sobre el alias crudo, cuando está presente.
+ */
+function computeDeliveryAddress(
+  address: AddressRecord | null,
+  isDeliveryDifferentFromInvoice: boolean,
+  countryIso: string | null
+): ConsolidatedAddress {
+  if (address === null) {
+    // No debería ocurrir en un pedido real (la dirección de entrega es la del propio pedido),
+    // pero se degrada igual que un transportista 404: nunca tumba la consolidación entera por
+    // un dato secundario. Documentado como decisión no cubierta explícitamente por el prompt.
+    return { pickupPointName: null, city: "", postcode: "", countryId: 0, countryIso: null };
+  }
+
+  const alias = address.alias ?? "";
+  const isPickupPoint = isDeliveryDifferentFromInvoice && !isBlank(alias) && !isGenericAddressAlias(alias);
+  const rawPickupName = isPickupPoint ? (firstNonBlank(address.company) ?? alias.trim()) : null;
+  const pickupPointName = rawPickupName === null ? null : unescapeApiText(rawPickupName);
+
+  return {
+    pickupPointName,
+    city: address.city?.trim() ?? "",
+    postcode: address.postcode?.trim() ?? "",
+    countryId: toNumericId(address.id_country),
+    countryIso,
+  };
+}
+
+// ─── Pago ─────────────────────────────────────────────────────────────────
+
+/**
+ * Resuelve el pago consolidado. `card_number` llega enmascarado (ej. `"497355XXXXXX8929"`);
+ * solo se conservan los últimos 4 caracteres, nunca la cadena completa, ni siquiera enmascarada.
+ * `null` si no hay ningún pago registrado (verificado: `order_payments` puede no traer nada) o si
+ * el medio de pago no es tarjeta (ej. PayPal, verificado con `card_number` en `""`).
+ *
+ * Si hubiera más de un pago para el pedido (no observado en los pedidos verificados), se toma el
+ * más reciente por `date_add`: no hay en el prompt un criterio de agregación, y sumar importes de
+ * medios de pago distintos en un solo `method`/`cardLast4` mezclaría datos de dos eventos reales
+ * en uno que no existió. Decisión no cubierta explícitamente por el prompt.
+ */
+function computePayment(payments: OrderPaymentRecord[]): ConsolidatedPayment | null {
+  if (payments.length === 0) return null;
+
+  const latest = [...payments].sort(
+    (a, b) => (parsePrestashopDate(a.date_add)?.getTime() ?? 0) - (parsePrestashopDate(b.date_add)?.getTime() ?? 0)
+  ).at(-1)!;
+
+  const cardNumber = latest.card_number;
+  const cardLast4 = !isBlank(cardNumber) && cardNumber!.trim().length >= 4 ? cardNumber!.trim().slice(-4) : null;
+
+  return {
+    method: firstNonBlank(latest.payment_method),
+    cardLast4,
+    amount: toNumber(latest.amount),
+    date: parsePrestashopDate(latest.date_add),
+  };
+}
+
 // ─── Conversación ─────────────────────────────────────────────────────────
 
 /** Última fecha de actividad de un hilo: la del mensaje más reciente, o `date_upd`/`date_add` si no tiene ninguno. */
@@ -758,6 +994,32 @@ function computeConversation(
 // ─── Reembolso: vale o dinero ─────────────────────────────────────────────
 
 /**
+ * Cruza las líneas de todos los avoirs (`order_slip.associations.order_slip_details`, solo
+ * presentes con `displayFull`) contra las líneas del pedido, por `id_order_detail` normalizado.
+ * Un avoir 100% de envío no trae ninguna línea (no tiene `associations` en absoluto: verificado
+ * en el pedido 705570, avoir 72384) y no aporta nada acá.
+ *
+ * Si un `id_order_detail` no aparece entre las líneas del pedido, la línea se incluye igual con
+ * `name: null` — nunca se descarta en silencio, para no ocultar que hay un importe abonado sin
+ * poder decir de qué producto.
+ */
+function buildRefundLines(slips: OrderSlipRecord[], orderLines: OrderDetailRecord[]): ConsolidatedRefundLine[] {
+  const nameByDetailId = new Map(orderLines.map((line) => [toNumericId(line.id), line.product_name] as const));
+
+  const lines: ConsolidatedRefundLine[] = [];
+  for (const slip of slips) {
+    for (const detail of slip.associations?.order_slip_details ?? []) {
+      lines.push({
+        name: nameByDetailId.get(toNumericId(detail.id_order_detail)) ?? null,
+        quantity: toNumber(detail.product_quantity),
+        amount: toNumber(detail.amount_tax_incl),
+      });
+    }
+  }
+  return lines;
+}
+
+/**
  * Detecta si algún avoir del pedido fue un vale en vez de dinero: busca, entre los `cart_rules` del
  * cliente, uno activo cuyo código coincida EXACTAMENTE con `V<id_cart_rule>C<id_customer>O<id_order>`
  * (el propio id de la regla forma parte de su propio código, así que se recorre cada regla y se
@@ -768,7 +1030,8 @@ function computeRefund(
   slips: OrderSlipRecord[],
   cartRules: CartRuleRecord[],
   customerId: number,
-  orderId: number
+  orderId: number,
+  orderLines: OrderDetailRecord[]
 ): ConsolidatedRefund | null {
   if (slips.length === 0) return null;
 
@@ -782,6 +1045,8 @@ function computeRefund(
   ).at(-1)!;
   const processedDate = parsePrestashopDate(latestSlip.date_add) ?? new Date(0);
 
+  const lines = buildRefundLines(slips, orderLines);
+
   const matchingRule = cartRules.find(
     (rule) => toBool(rule.active) && rule.code === `V${rule.id}C${customerId}O${orderId}`
   );
@@ -792,10 +1057,11 @@ function computeRefund(
       type: "VOUCHER",
       voucherExpiresAt: parsePrestashopDate(matchingRule.date_to),
       processedDate,
+      lines,
     };
   }
 
-  return { amount, type: "MONEY", voucherExpiresAt: null, processedDate };
+  return { amount, type: "MONEY", voucherExpiresAt: null, processedDate, lines };
 }
 
 // ─── Orquestación ─────────────────────────────────────────────────────────
@@ -842,27 +1108,41 @@ export async function consolidateOrder(
   const attributeIds = [...new Set(lines.map((l) => l.product_attribute_id))];
 
   // ─── Ola 2 ──────────────────────────────────────────────────────────
-  const [products, stocks, shippingSources, histories, threads, slips] = await Promise.all([
-    fetchBatch<ProductBrandRecord>("products", productIds, "id", PRODUCT_FIELDS),
-    fetchBatch<StockAvailableRecord>("stock_availables", attributeIds, "id_product_attribute", STOCK_FIELDS),
-    fetchShippingSources(orderId),
-    getMany<OrderHistoryRecord>("order_histories", { filter: { id_order: orderId }, display: ORDER_HISTORY_FIELDS }),
-    getMany<CustomerThreadRecord>("customer_threads", {
-      filter: { id_order: orderId },
-      display: CUSTOMER_THREAD_FIELDS,
-    }),
-    getMany<OrderSlipRecord>("order_slip", { filter: { id_order: orderId }, display: ORDER_SLIP_FIELDS }),
-  ]);
+  // La dirección de entrega solo puede pedirse acá: depende de `header.id_address_delivery`,
+  // recién resuelto en la ola 1. `order_payments` solo depende de `header.reference`, ya
+  // conocida también desde la ola 1 (misma razón por la que no se sumó como una cuarta ola).
+  const [products, stocks, shippingSources, histories, threads, slips, deliveryAddressRecord, payments] =
+    await Promise.all([
+      fetchBatch<ProductBrandRecord>("products", productIds, "id", PRODUCT_FIELDS),
+      fetchBatch<StockAvailableRecord>("stock_availables", attributeIds, "id_product_attribute", STOCK_FIELDS),
+      fetchShippingSources(orderId),
+      getMany<OrderHistoryRecord>("order_histories", { filter: { id_order: orderId }, display: ORDER_HISTORY_FIELDS }),
+      getMany<CustomerThreadRecord>("customer_threads", {
+        filter: { id_order: orderId },
+        display: CUSTOMER_THREAD_FIELDS,
+      }),
+      // `displayFull`, no una whitelist: ver el comentario de esa opción en `PrestashopQueryParams`.
+      getMany<OrderSlipRecord>("order_slip", { filter: { id_order: orderId }, displayFull: true }),
+      fetchAddressSafe(toNumericId(header.id_address_delivery)),
+      getMany<OrderPaymentRecord>("order_payments", {
+        filter: { order_reference: header.reference },
+        display: ORDER_PAYMENT_FIELDS,
+      }),
+    ]);
 
   // ─── Ola 3 ──────────────────────────────────────────────────────────
   // `cart_rules` solo hace falta si hay al menos un avoir que clasificar: sin avoir no hay nada que
-  // distinguir entre vale y dinero.
+  // distinguir entre vale y dinero. `countries` solo puede pedirse acá: depende de
+  // `deliveryAddressRecord.id_country`, recién resuelto en la ola 2.
   const threadIds = threads.map((t) => t.id);
-  const [allMessages, cartRules] = await Promise.all([
+  const [allMessages, cartRules, countryIso] = await Promise.all([
     fetchBatch<CustomerMessageRecord>("customer_messages", threadIds, "id_customer_thread", CUSTOMER_MESSAGE_FIELDS),
     slips.length > 0
       ? getMany<CartRuleRecord>("cart_rules", { filter: { id_customer: customerId }, display: CART_RULE_FIELDS })
       : Promise.resolve<CartRuleRecord[]>([]),
+    deliveryAddressRecord !== null
+      ? getCountryIso(toNumericId(deliveryAddressRecord.id_country))
+      : Promise.resolve<string | null>(null),
   ]);
 
   // ─── Ensamblado ─────────────────────────────────────────────────────
@@ -890,7 +1170,11 @@ export async function consolidateOrder(
 
   const shipping = computeShipping(header, shippingSources, group, histories, stateGroups, input.customer.idLang);
   const timeline = computeTimeline(histories, stateGroups);
-  const refund = computeRefund(slips, cartRules, customerId, orderId);
+  const refund = computeRefund(slips, cartRules, customerId, orderId, lines);
+  const isDeliveryDifferentFromInvoice =
+    toNumericId(header.id_address_delivery) !== toNumericId(header.id_address_invoice);
+  const deliveryAddress = computeDeliveryAddress(deliveryAddressRecord, isDeliveryDifferentFromInvoice, countryIso);
+  const payment = computePayment(payments);
   const primaryThread = pickPrimaryThread(threads, messagesByThread);
   const conversation = computeConversation(primaryThread, messagesByThread, allMessages, input.today);
   const historyHasInfo = computeHistoryHasInfo(allMessages);
@@ -929,6 +1213,7 @@ export async function consolidateOrder(
       },
       currency: DEFAULT_CURRENCY,
       timeline,
+      deliveryAddress,
     },
     customer: {
       firstname: input.customer.firstname,
@@ -948,6 +1233,7 @@ export async function consolidateOrder(
       completed: currentStateId === RETURN_COMPLETED_STATE_ID,
     },
     conversation,
+    payment,
     facts,
     orderContext,
     extraContext,

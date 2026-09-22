@@ -761,6 +761,11 @@ export function createMcpServer(): McpServer {
           refund: consolidated.refund,
           return: consolidated.return,
           conversation: consolidated.conversation,
+          // `order`/`refund` viajan como el objeto completo, así que sus campos nuevos
+          // (deliveryAddress, refund.lines) ya llegan solos. `payment` es un campo nuevo de
+          // primer nivel en `OrderConsolidationResult`: sin listarlo acá explícitamente, este
+          // payload no lo tendría aunque el handler HTTP sí lo exponga.
+          payment: consolidated.payment,
           guidance,
         };
 
