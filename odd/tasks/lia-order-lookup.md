@@ -386,16 +386,41 @@ Verificado contra el entorno real, con la base caída:
 
 Las 11 tareas cerradas. `pnpm build` en verde, **164 tests** en verde.
 
-### Pendiente, y no depende de código
+### Desplegado
 
-1. **Aplicar la migración**: `pnpm migrate:deploy` aplica las dos pendientes
-   (`add_category_kind` y `add_rules_engine`). El host remoto dio P1001 en los últimos
-   intentos: comprobar que responde antes.
-2. **Sembrar y activar**: `pnpm seed:rules` crea el RuleSet v1 en `draft`. Activarlo es
-   deliberado, por la tool MCP `activate_rule_set` y previo `simulate_rules`.
-3. **Los 8 `body` de plantilla** siguen vacíos: los textos están en
+- [x] **Migración aplicada** (22/09/2026): `add_category_kind` y `add_rules_engine`.
+  Verificado: las 7 tablas existen y el índice único parcial
+  `rule_sets_one_active_per_client` quedó creado con su cláusula `WHERE status='active'`.
+- [x] **Reglas sembradas**: RuleSet v1 en `draft` — 10 grupos de estado, 44 marcas,
+  14 filas de matriz, 9 plantillas, 3 ajustes, 44 festivos.
+- [ ] **Activar**: decisión deliberada, vía `simulate_rules` y `activate_rule_set`.
+
+#### Hueco encontrado al desplegar: la tabla de festivos quedaba vacía
+
+La siembra cargaba todo menos `rule_holidays` — la tarea que la escribió dejó los
+festivos fuera porque `business-days.ts` todavía no existía cuando arrancó. Consecuencia
+concreta: el cálculo contaba el 14 de julio y el 15 de agosto como días hábiles, así que
+las fechas límite salían optimistas y un pedido podía marcarse como retrasado antes de
+tiempo, disparando el mail equivocado.
+
+Y había un segundo fallo encima: el bloque de festivos estaba **después** de la guarda de
+idempotencia, así que una resiembra nunca los habría creado. Movido antes de la guarda,
+porque los festivos no dependen del RuleSet: son hechos de calendario.
+
+Verificado tras el arreglo: un pedido del 13/07/2026 con plazo de 2 días hábiles vence el
+**16/07** con los festivos cargados, frente al 15/07 sin ellos.
+
+#### La base es intermitente
+
+Cuatro cortes distintos durante el despliegue (dos `P1001`, dos `SocketTimeout`), todos
+transitorios y resueltos al reintentar. Las consultas normales tardan 350ms-1s. Esto
+respalda la decisión de T11 de mapear **cualquier** fallo de reglas a 503 y no a 500: no
+es un caso teórico, pasa varias veces por sesión.
+
+### Pendiente, y no depende de código
+1. **Los 8 `body` de plantilla** siguen vacíos: los textos están en
    `scenario_lia.numbers`, hoja Feuil2, que no está en el repositorio.
-4. **Confirmar con el cliente** la desviación del §4 fila 13 documentada en T8, y los
+2. **Confirmar con el cliente** la desviación del §4 fila 13 documentada en T8, y los
    plazos reales de las tres submarcas sembradas por aproximación.
 
 ### T10 — decisiones y hallazgos

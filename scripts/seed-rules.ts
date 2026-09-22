@@ -14,6 +14,7 @@
  */
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
+import { frenchPublicHolidays } from "../src/lib/business-days";
 import {
   RULES_SEED_CLIENT_ID,
   RULES_SEED_VERSION,
@@ -33,6 +34,28 @@ async function main(): Promise<void> {
       },
     },
   });
+
+  // Va ANTES de la guarda de idempotencia a propósito: los festivos son
+  // independientes del RuleSet, así que deben sembrarse aunque el conjunto ya
+  // exista. Colgarlos detrás del `return` hacía que una resiembra nunca los creara.
+  // Festivos: no cuelgan del RuleSet porque son hechos de calendario, no decisiones
+  // de negocio. Se siembran aparte y son idempotentes (únicos por cliente+día).
+  //
+  // Sin esta tabla poblada, el cálculo de días hábiles cuenta el 14 de julio y el 15
+  // de agosto como laborables: las fechas límite salen optimistas y un pedido puede
+  // marcarse como retrasado antes de tiempo, disparando el mail equivocado.
+  const desde = new Date().getUTCFullYear() - 1;
+  const festivos = [];
+  for (let year = desde; year <= desde + 3; year += 1) {
+    for (const h of frenchPublicHolidays(year)) {
+      festivos.push({ clientId: RULES_SEED_CLIENT_ID, day: new Date(`${h.day}T00:00:00.000Z`), label: h.label });
+    }
+  }
+  const { count: festivosInsertados } = await prisma.ruleHoliday.createMany({
+    data: festivos,
+    skipDuplicates: true,
+  });
+  console.log(`  - Festivos de Francia ${desde}-${desde + 3} (RuleHoliday): ${festivosInsertados} nuevos de ${festivos.length}`);
 
   if (existing) {
     console.log(
