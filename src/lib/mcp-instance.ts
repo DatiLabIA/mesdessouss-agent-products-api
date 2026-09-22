@@ -45,6 +45,37 @@ const CLIENT_ID = "mesdessous";
 /** Acepta un string o un array de strings (para filtros multi-valor de la tool MCP). */
 const stringOrArray = z.union([z.string(), z.array(z.string())]);
 
+/**
+ * Convierte cualquier fallo de una tool de reglas en un resultado legible.
+ *
+ * Los `catch` comprobaban solo los errores tipados del conjunto de reglas y dejaban
+ * escapar el resto como excepción cruda. El más probable no es ninguno de los
+ * tipados: un corte de la base de datos — esta se cortó cinco veces en una sola
+ * sesión de despliegue. Quien opera por MCP recibía un volcado en vez de "reintentá
+ * en unos segundos", y no podía distinguir un problema de infraestructura de un
+ * error suyo.
+ */
+function ruleToolError(err: unknown): { content: Array<{ type: "text"; text: string }>; isError: true } {
+  const conocido =
+    err instanceof RuleSetNotFoundError ||
+    err instanceof RuleSetStateError ||
+    err instanceof RuleSetValidationError ||
+    err instanceof RuleSetActivationConflictError;
+  const detalle = err instanceof Error ? err.message.split("\n")[0] : String(err);
+  return {
+    content: [
+      {
+        type: "text",
+        text: conocido
+          ? detalle
+          : `No se pudo completar la operación por un fallo de la base de datos, no por los datos enviados. Reintentá en unos segundos. Detalle: ${detalle}`,
+      },
+    ],
+    isError: true,
+  };
+}
+
+
 /** Crea y configura una instancia de McpServer con todas las tools de knowledge base. */
 export function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -454,7 +485,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -476,7 +507,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -513,7 +544,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetValidationError || err instanceof RuleSetVersionConflictError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -539,7 +570,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -563,7 +594,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -606,7 +637,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -633,7 +664,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -656,7 +687,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -746,7 +777,7 @@ export function createMcpServer(): McpServer {
             isError: true,
           };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -802,7 +833,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetValidationError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -833,7 +864,7 @@ export function createMcpServer(): McpServer {
         ) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
@@ -859,7 +890,7 @@ export function createMcpServer(): McpServer {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetActivationConflictError) {
           return { content: [{ type: "text", text: err.message }], isError: true };
         }
-        throw err;
+        return ruleToolError(err);
       }
     }
   );
