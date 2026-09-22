@@ -174,6 +174,19 @@ export interface OrderLookupOrderView {
   group: string;
   totals: { totalPaid: number; shippingPaid: number };
   currency: string;
+  /**
+   * Cuándo entró el pedido en cada estado, en orden ascendente. Responde "¿desde
+   * cuándo lleva así?", que es lo que pregunta el cliente cuando un pedido se queda
+   * quieto y el estado actual por sí solo no dice nada.
+   */
+  timeline: OrderLookupStatusChangeView[];
+}
+
+export interface OrderLookupStatusChangeView {
+  stateId: number;
+  /** Grupo al que mapea el estado, o `D` si no está mapeado. */
+  group: string;
+  date: Date;
 }
 
 /** Nunca lleva campos sensibles (`passwd`, `secure_key`, etc.): construido con campos explícitos. */
@@ -198,6 +211,8 @@ export interface OrderLookupShippingView {
   trackingUrl: string | null;
   shippedWithoutTracking: boolean;
   shippedAt: Date | null;
+  /** Plazo que promete el transportista, resuelto al idioma del cliente. */
+  carrierDelay: string | null;
 }
 
 export interface OrderLookupRefundView {
@@ -218,6 +233,28 @@ export interface OrderLookupConversationView {
   lastMessage: string | null;
   lastMessageDate: Date | null;
   awaitingShopReply: boolean;
+  /**
+   * Los últimos 10 mensajes reales de TODOS los hilos del pedido, en orden
+   * cronológico y sin las notas automáticas del módulo de pago.
+   *
+   * Sin esto el agente no ve lo que ya se le dijo al cliente y se contradice: en el
+   * pedido YOGGHZYXI la tienda había prometido "2 à 5 jours ouvrés" cuando la tabla
+   * de plazos de la propia tienda dice 9 días para esa marca.
+   */
+  messages: OrderLookupMessageView[];
+}
+
+export interface OrderLookupMessageView {
+  date: Date;
+  /** `CUSTOMER` | `SHOP` | `SYSTEM`, deducido del contenido. */
+  author: string;
+  /**
+   * `false` cuando la autoría se dedujo de `id_employee`, que no es fiable: se ha
+   * visto a un empleado pegar el correo del cliente dentro del hilo.
+   */
+  authorCertain: boolean;
+  text: string;
+  threadId: number;
 }
 
 export interface OrderLookupGuidanceFactView {

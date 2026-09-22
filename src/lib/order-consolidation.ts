@@ -100,12 +100,18 @@ interface CarrierRecord {
   id: number;
   name: string;
   url: string;
-  delay: string;
+  /** Campo traducible, igual que `order_states.name`: se resuelve con `resolveTranslatable`. */
+  delay: TranslatableField;
 }
 
 interface OrderHistoryRecord {
   id: number;
-  id_order_state: number;
+  /**
+   * Igual patrón que el resto de campos `id_*` (verificado en T9 para `product_id`/`id_carrier`):
+   * viaja como string mientras `id` viaja como número. Se normaliza con `toNumericId` en cada uso,
+   * nunca se compara ni se indexa cruda contra el mapa de grupos.
+   */
+  id_order_state: string | number;
   date_add: string;
 }
 
@@ -279,6 +285,69 @@ function isFromCustomer(message: CustomerMessageRecord): boolean {
   return toNumber(message.id_employee) === 0;
 }
 
+// ─── Inferencia de autoría de un mensaje ───────────────────────────────────
+//
+// `id_employee` NO es fiable: verificado en el hilo 185221 del pedido YOGGHZYXI,
+// un mensaje con `id_employee = 28` (un empleado real) cuyo contenido es
+// evidentemente del cliente -se queja de su propio pedido y firma "Yamine
+// Priem"-, porque alguien de la tienda pegó el correo del cliente dentro del
+// hilo. Mismo patrón de fallo silencioso que ya quemó al flag `private`: un
+// campo que parece de autoría y no lo es.
+//
+// Quita acentos (NFD + strip de diacríticos) y normaliza comillas tipográficas
+// antes de comparar, para que "commandé"/"commande" o "j'ai"/"j'ai" (con
+// apóstrofo curvo) casen igual.
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[‘’]/g, "'")
+    .toLowerCase();
+}
+
+/** Firma verificada en todas las respuestas reales de Aurélie, Andrea y Mathilde. */
+const SHOP_SIGNATURE_MARKER = "service client";
+
+/**
+ * Frases en primera persona como comprador. "ma commande n°" no hace falta como entrada aparte:
+ * ya es superconjunto de "ma commande".
+ */
+const CUSTOMER_MARKERS = [
+  "ma commande",
+  "mon commande",
+  "j'ai commande",
+  "j'ai passe",
+  "je n'ai pas recu",
+  "mon colis",
+] as const;
+
+function hasShopSignature(message: string): boolean {
+  return normalizeForMatch(message).includes(SHOP_SIGNATURE_MARKER);
+}
+
+function hasCustomerMarker(message: string): boolean {
+  const normalized = normalizeForMatch(message);
+  return CUSTOMER_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+/**
+ * Cascada de inferencia de autoría de un mensaje, en orden:
+ *
+ * 1. Nota del módulo de pago (`isPaymentModuleNote`) → `SYSTEM`, certero.
+ * 2. Firma de la tienda presente (`service client`, insensible a mayúsculas/acentos) → `SHOP`, certero.
+ * 3. Marca de cliente presente y sin firma de tienda → `CUSTOMER`, certero, sin importar `id_employee`.
+ * 4. Ninguna de las dos → cae a `id_employee` (>0 = `SHOP`, 0/ausente = `CUSTOMER`), pero `authorCertain: false`.
+ *
+ * El paso 3 es el que corrige el caso YOGGHZYXI: un mensaje con `id_employee > 0` pero contenido
+ * de cliente ya no se clasifica como `SHOP` por el solo hecho de tener un empleado asignado.
+ */
+function inferMessageAuthor(message: CustomerMessageRecord): { author: MessageAuthor; authorCertain: boolean } {
+  if (isPaymentModuleNote(message.message)) return { author: "SYSTEM", authorCertain: true };
+  if (hasShopSignature(message.message)) return { author: "SHOP", authorCertain: true };
+  if (hasCustomerMarker(message.message)) return { author: "CUSTOMER", authorCertain: true };
+  return { author: isFromCustomer(message) ? "CUSTOMER" : "SHOP", authorCertain: false };
+}
+
 // ─── Salida ───────────────────────────────────────────────────────────────
 
 export interface ConsolidatedOrderStatus {
@@ -291,6 +360,13 @@ export interface ConsolidatedOrderTotals {
   shippingPaid: number;
 }
 
+export interface ConsolidatedStatusChange {
+  stateId: number;
+  /** Grupo al que mapea (§2.1 del documento de reglas), o `"D"` si el estado no está mapeado. */
+  group: StateGroup;
+  date: Date;
+}
+
 export interface ConsolidatedOrder {
   id: number;
   reference: string;
@@ -300,6 +376,8 @@ export interface ConsolidatedOrder {
   group: StateGroup;
   totals: ConsolidatedOrderTotals;
   currency: string;
+  /** Historial de cambios de estado (`order_histories`), ordenado cronológicamente ascendente. */
+  timeline: ConsolidatedStatusChange[];
 }
 
 /** Nunca lleva campos sensibles (`passwd`, `secure_key`, etc.): ya vienen filtrados desde `VerifiedCustomerData`. */
@@ -330,6 +408,13 @@ export interface ConsolidatedShipping {
   shippedWithoutTracking: boolean;
   /** Fecha de la primera entrada en `order_histories` cuyo estado mapea a grupo B. `null` si nunca se alcanzó. */
   shippedAt: Date | null;
+  /**
+   * Plazo prometido por el transportista (`carriers.delay`), resuelto al idioma del cliente con
+   * `resolveTranslatable`. `null` si no hay transportista conocido o el campo viene vacío. Prueba
+   * concreta de por qué importa: en un pedido a EEUU, el texto resuelto ("5 a 9 días para el resto
+   * del mundo") era justo lo que probaba el retraso.
+   */
+  carrierDelay: string | null;
 }
 
 export interface ConsolidatedRefund {
@@ -349,16 +434,37 @@ export interface ConsolidatedReturn {
   completed: boolean;
 }
 
+export type MessageAuthor = "CUSTOMER" | "SHOP" | "SYSTEM";
+
+export interface ConsolidatedMessage {
+  date: Date;
+  author: MessageAuthor;
+  /** `false` cuando la autoría se dedujo de un campo poco fiable (`id_employee`) y podría estar equivocada. */
+  authorCertain: boolean;
+  text: string;
+  threadId: number;
+}
+
+/** Cuántos mensajes recientes viajan en `ConsolidatedConversation.messages`. */
+const MAX_RECENT_MESSAGES = 10;
+
 export interface ConsolidatedConversation {
   threadId: number | null;
   lastMessage: string | null;
   lastMessageDate: Date | null;
   /**
-   * El último mensaje real (no una nota del módulo de pago) es del cliente y pasaron más de 24
-   * horas sin respuesta. No está en el documento de reglas: se agrega porque en 4 de 6 casos reales
-   * auditados el dato que resolvía la consulta estaba en el hilo, no en el pedido.
+   * El último mensaje real (no una nota del módulo de pago) es del cliente, con autoría inferida
+   * por la cascada de `inferMessageAuthor` (nunca por `isFromCustomer`/`id_employee` en crudo), y
+   * pasaron más de 24 horas sin respuesta. No está en el documento de reglas: se agrega porque en
+   * 4 de 6 casos reales auditados el dato que resolvía la consulta estaba en el hilo, no en el pedido.
    */
   awaitingShopReply: boolean;
+  /**
+   * Últimos `MAX_RECENT_MESSAGES` mensajes reales del pedido, fusionados de TODOS sus hilos (un
+   * pedido puede tener más de uno: el 704330 tenía dos) y ordenados cronológicamente ascendente.
+   * Nunca incluye notas automáticas del módulo de pago.
+   */
+  messages: ConsolidatedMessage[];
 }
 
 export interface OrderConsolidationResult {
@@ -447,12 +553,37 @@ async function fetchShippingSources(orderId: number): Promise<ShippingSources> {
 function computeShippedAt(histories: OrderHistoryRecord[], stateGroups: Map<number, StateGroup>): Date | null {
   let earliest: Date | null = null;
   for (const history of histories) {
-    if (stateGroups.get(history.id_order_state) !== "B") continue;
+    if (stateGroups.get(toNumericId(history.id_order_state)) !== "B") continue;
     const date = parsePrestashopDate(history.date_add);
     if (date === null) continue;
     if (earliest === null || date.getTime() < earliest.getTime()) earliest = date;
   }
   return earliest;
+}
+
+/**
+ * Timeline de cambios de estado del pedido (`order_histories`), ordenado cronológicamente
+ * ascendente. No se consulta `order_states` por cada entrada para resolver un nombre -sería una
+ * llamada HTTP por estado-: con el id y el grupo alcanza para que Lia razone sobre "cuánto lleva en
+ * este estado"; el nombre del estado ACTUAL ya viaja en `order.status.name`. Motivo concreto: en el
+ * pedido YOGGHZYXI el cliente pregunta desde cuándo está en tratamiento, y el historial dice que
+ * entró en el estado 17 el 14/09 y no se movió. Ese dato ya se consultaba y no salía.
+ */
+function computeTimeline(
+  histories: OrderHistoryRecord[],
+  stateGroups: Map<number, StateGroup>
+): ConsolidatedStatusChange[] {
+  return histories
+    .map((history) => {
+      const stateId = toNumericId(history.id_order_state);
+      return {
+        stateId,
+        group: stateGroups.get(stateId) ?? ("D" as StateGroup),
+        date: parsePrestashopDate(history.date_add),
+      };
+    })
+    .filter((entry): entry is ConsolidatedStatusChange => entry.date !== null)
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
 /**
@@ -469,7 +600,8 @@ function computeShipping(
   sources: ShippingSources,
   group: StateGroup,
   histories: OrderHistoryRecord[],
-  stateGroups: Map<number, StateGroup>
+  stateGroups: Map<number, StateGroup>,
+  idLang: number
 ): ConsolidatedShipping {
   // Indexado por id ya normalizado: `carriers.id` llega como número y
   // `order_carriers.id_carrier` como string, así que un Map sin normalizar
@@ -507,12 +639,16 @@ function computeShipping(
   const impliesShipped = group === "B" || group === "C";
   const shippedWithoutTracking = impliesShipped && trackingNumber === null;
 
+  const resolvedDelay = sourceCarrier !== null ? resolveTranslatable(sourceCarrier.delay, idLang) : null;
+  const carrierDelay = resolvedDelay !== null && !isBlank(resolvedDelay) ? resolvedDelay : null;
+
   return {
     carrierName: sourceCarrier?.name ?? null,
     trackingNumber,
     trackingUrl,
     shippedWithoutTracking,
     shippedAt: computeShippedAt(histories, stateGroups),
+    carrierDelay,
   };
 }
 
@@ -563,36 +699,59 @@ function computeHistoryHasInfo(allMessages: CustomerMessageRecord[]): boolean | 
   return hasRealMessage ? null : false;
 }
 
+/**
+ * Fusiona los mensajes reales (sin notas del módulo de pago) de TODOS los hilos del pedido, con
+ * autoría inferida por `inferMessageAuthor`, ordenados cronológicamente ascendente. `allMessages`
+ * ya viene de todos los hilos del pedido (ola 3 de `consolidateOrder`), así que no hace falta
+ * recorrer hilo por hilo.
+ */
+function buildConversationMessages(allMessages: CustomerMessageRecord[]): ConsolidatedMessage[] {
+  return allMessages
+    .map((message) => {
+      const { author, authorCertain } = inferMessageAuthor(message);
+      return {
+        date: parsePrestashopDate(message.date_add) ?? new Date(0),
+        author,
+        authorCertain,
+        text: message.message,
+        threadId: toNumericId(message.id_customer_thread),
+      };
+    })
+    .filter((message) => message.author !== "SYSTEM")
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
 function computeConversation(
   primaryThread: CustomerThreadRecord | null,
   messagesByThread: Map<number, CustomerMessageRecord[]>,
+  allMessages: CustomerMessageRecord[],
   today: Date
 ): ConsolidatedConversation {
-  if (primaryThread === null) {
-    return { threadId: null, lastMessage: null, lastMessageDate: null, awaitingShopReply: false };
-  }
+  const conversationMessages = buildConversationMessages(allMessages);
+  const recentMessages = conversationMessages.slice(-MAX_RECENT_MESSAGES);
 
-  const messages = messagesByThread.get(primaryThread.id) ?? [];
-  const sorted = [...messages].sort(
-    (a, b) => (parsePrestashopDate(a.date_add)?.getTime() ?? 0) - (parsePrestashopDate(b.date_add)?.getTime() ?? 0)
-  );
-
-  const last = sorted.at(-1) ?? null;
-  const realMessages = sorted.filter((m) => !isPaymentModuleNote(m.message));
-  const lastReal = realMessages.at(-1) ?? null;
-  const lastRealDate = lastReal !== null ? parsePrestashopDate(lastReal.date_add) : null;
-
+  const lastReal = conversationMessages.at(-1) ?? null;
   const awaitingShopReply =
     lastReal !== null &&
-    lastRealDate !== null &&
-    isFromCustomer(lastReal) &&
-    today.getTime() - lastRealDate.getTime() > AWAITING_REPLY_THRESHOLD_MS;
+    lastReal.author === "CUSTOMER" &&
+    today.getTime() - lastReal.date.getTime() > AWAITING_REPLY_THRESHOLD_MS;
+
+  if (primaryThread === null) {
+    return { threadId: null, lastMessage: null, lastMessageDate: null, awaitingShopReply, messages: recentMessages };
+  }
+
+  const primaryMessages = messagesByThread.get(primaryThread.id) ?? [];
+  const sorted = [...primaryMessages].sort(
+    (a, b) => (parsePrestashopDate(a.date_add)?.getTime() ?? 0) - (parsePrestashopDate(b.date_add)?.getTime() ?? 0)
+  );
+  const last = sorted.at(-1) ?? null;
 
   return {
     threadId: primaryThread.id,
     lastMessage: last?.message ?? null,
     lastMessageDate: last !== null ? parsePrestashopDate(last.date_add) : null,
     awaitingShopReply,
+    messages: recentMessages,
   };
 }
 
@@ -729,10 +888,11 @@ export async function consolidateOrder(
     ...shippingSources.orderCarriers.map((c) => c.tracking_number)
   );
 
-  const shipping = computeShipping(header, shippingSources, group, histories, stateGroups);
+  const shipping = computeShipping(header, shippingSources, group, histories, stateGroups, input.customer.idLang);
+  const timeline = computeTimeline(histories, stateGroups);
   const refund = computeRefund(slips, cartRules, customerId, orderId);
   const primaryThread = pickPrimaryThread(threads, messagesByThread);
-  const conversation = computeConversation(primaryThread, messagesByThread, input.today);
+  const conversation = computeConversation(primaryThread, messagesByThread, allMessages, input.today);
   const historyHasInfo = computeHistoryHasInfo(allMessages);
 
   const facts: OrderFactsInput = {
@@ -768,6 +928,7 @@ export async function consolidateOrder(
         shippingPaid: toNumber(header.total_shipping_tax_incl),
       },
       currency: DEFAULT_CURRENCY,
+      timeline,
     },
     customer: {
       firstname: input.customer.firstname,

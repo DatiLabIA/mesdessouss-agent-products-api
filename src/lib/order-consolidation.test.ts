@@ -580,3 +580,340 @@ describe("consolidateOrder — fallos transitorios", () => {
     assert.equal(result.shipping.trackingUrl, null);
   });
 });
+
+// ─── Autoría de mensajes: la cascada ────────────────────────────────────
+
+describe("consolidateOrder — autoría de mensajes", () => {
+  test("id_employee > 0 pero contenido de cliente (caso real YOGGHZYXI, hilo 185221): CUSTOMER, authorCertain true", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 185221, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-10 08:00:00", date_upd: "2026-09-10 08:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            {
+              id: 10,
+              id_customer_thread: 185221,
+              // Un empleado real (id 28) pegó el correo del cliente dentro del hilo: id_employee > 0
+              // no puede ganarle a un contenido evidentemente de cliente.
+              id_employee: 28,
+              message:
+                "Bonjour, j'ai passé ma commande il y a 3 semaines et je n'ai pas reçu mon colis. " +
+                "Merci de me répondre.\nYamine Priem",
+              date_add: "2026-09-10 08:00:00",
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages.length, 1);
+    assert.equal(result.conversation.messages[0].author, "CUSTOMER");
+    assert.equal(result.conversation.messages[0].authorCertain, true);
+  });
+
+  test('firma "Service clients Mesdessous.fr" presente: SHOP, authorCertain true (gana sobre id_employee ausente)', async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 950, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "closed", date_add: "2026-09-11 09:00:00", date_upd: "2026-09-11 09:05:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            {
+              id: 12,
+              id_customer_thread: 950,
+              id_employee: null, // sin id_employee: por id_employee solo, caería a CUSTOMER
+              message: "Bonjour, votre commande est en cours de préparation.\n\nService clients Mesdessous.fr",
+              date_add: "2026-09-11 09:05:00",
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages[0].author, "SHOP");
+    assert.equal(result.conversation.messages[0].authorCertain, true);
+  });
+
+  test("nota del módulo de pago: SYSTEM, no aparece en los últimos 10 ni afecta awaitingShopReply", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 960, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-19 10:00:00", date_upd: "2026-09-21 11:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            {
+              id: 20,
+              id_customer_thread: 960,
+              id_employee: null,
+              message: "Bonjour, je n'ai pas reçu mon colis, merci de vérifier ma commande.",
+              date_add: "2026-09-19 10:00:00", // más de 24h antes de TODAY
+            },
+            {
+              id: 21,
+              id_customer_thread: 960,
+              id_employee: null,
+              // Nota automática del módulo de pago, más reciente que el mensaje real: si no se
+              // excluyera, "taparía" el mensaje real y awaitingShopReply daría false.
+              message: "Action successfully completed\n3DS: Y\nIPN: OK",
+              date_add: "2026-09-21 11:00:00",
+            },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages.length, 1);
+    assert.equal(result.conversation.messages[0].author, "CUSTOMER");
+    assert.equal(result.conversation.awaitingShopReply, true);
+  });
+
+  test("sin firma de tienda ni marca de cliente: cae a id_employee, authorCertain false", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 970, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-15 10:00:00", date_upd: "2026-09-15 10:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            { id: 30, id_customer_thread: 970, id_employee: 12, message: "Merci, bonne journée.", date_add: "2026-09-15 10:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages[0].author, "SHOP");
+    assert.equal(result.conversation.messages[0].authorCertain, false);
+  });
+});
+
+// ─── Hilos múltiples y ventana de los últimos 10 mensajes ───────────────
+
+describe("consolidateOrder — hilos múltiples y ventana de mensajes", () => {
+  test("mensajes de dos hilos distintos del mismo pedido: fusionados y ordenados por fecha", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 100, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "closed", date_add: "2026-09-01 09:00:00", date_upd: "2026-09-02 09:00:00" },
+            { id: 200, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-05 09:00:00", date_upd: "2026-09-05 09:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            { id: 1, id_customer_thread: 100, id_employee: null, message: "Bonjour, ma commande n'est pas arrivée.", date_add: "2026-09-01 09:00:00" },
+            { id: 2, id_customer_thread: 200, id_employee: null, message: "Bonjour, mon colis a un souci.", date_add: "2026-09-05 09:00:00" },
+            { id: 3, id_customer_thread: 100, id_employee: 5, message: "Voici une mise à jour.\nService client Mesdessous", date_add: "2026-09-02 09:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages.length, 3);
+    assert.deepEqual(
+      result.conversation.messages.map((m) => m.threadId),
+      [100, 100, 200]
+    );
+    assert.deepEqual(
+      result.conversation.messages.map((m) => m.text),
+      [
+        "Bonjour, ma commande n'est pas arrivée.",
+        "Voici une mise à jour.\nService client Mesdessous",
+        "Bonjour, mon colis a un souci.",
+      ]
+    );
+  });
+
+  test("hilo con 15 mensajes reales: se exponen los 10 últimos, en orden cronológico", async () => {
+    const messages = Array.from({ length: 15 }, (_, i) => ({
+      id: i + 1,
+      id_customer_thread: 500,
+      id_employee: i % 2 === 0 ? null : 3,
+      message: `Mensaje numero ${i + 1}`,
+      date_add: `2026-09-${String(i + 1).padStart(2, "0")} 10:00:00`,
+    }));
+
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 500, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-01 10:00:00", date_upd: "2026-09-15 10:00:00" },
+          ],
+        }),
+      },
+      customerMessages: { body: JSON.stringify({ customer_messages: messages }) },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.messages.length, 10);
+    assert.equal(result.conversation.messages[0].text, "Mensaje numero 6");
+    assert.equal(result.conversation.messages[9].text, "Mensaje numero 15");
+    for (let i = 1; i < result.conversation.messages.length; i++) {
+      assert.ok(result.conversation.messages[i].date.getTime() >= result.conversation.messages[i - 1].date.getTime());
+    }
+  });
+});
+
+// ─── awaitingShopReply con autoría inferida ──────────────────────────────
+
+describe("consolidateOrder — awaitingShopReply con autoría inferida", () => {
+  test("último mensaje real es del cliente hace más de 24h: awaitingShopReply true", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 980, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-18 10:00:00", date_upd: "2026-09-18 10:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            // id_employee > 0 pero contenido de cliente: sin la cascada, este test daría false.
+            { id: 40, id_customer_thread: 980, id_employee: 9, message: "Bonjour, je n'ai pas reçu ma commande n°980.", date_add: "2026-09-18 10:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.awaitingShopReply, true);
+  });
+
+  test("último mensaje real es del cliente hace menos de 24h: awaitingShopReply false", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 981, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-21 08:00:00", date_upd: "2026-09-21 08:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            // 4h antes de TODAY (2026-09-21T12:00:00Z).
+            { id: 41, id_customer_thread: 981, id_employee: null, message: "Bonjour, où en est ma commande ?", date_add: "2026-09-21 08:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.awaitingShopReply, false);
+  });
+});
+
+// ─── Timeline de estados ──────────────────────────────────────────────────
+
+describe("consolidateOrder — timeline de estados", () => {
+  test("ordenado cronológicamente ascendente, con el grupo correcto; un estado no mapeado cae en D", async () => {
+    stub({
+      orderHistories: {
+        body: JSON.stringify({
+          order_histories: [
+            // id_order_state como string, el patrón real verificado (T9): prueba que se normaliza
+            // con toNumericId antes de resolver el grupo.
+            { id: 1, id_order_state: String(STATE_B), date_add: "2026-09-05 10:00:00" },
+            { id: 2, id_order_state: STATE_A, date_add: "2026-09-01 09:00:00" },
+            { id: 3, id_order_state: 17, date_add: "2026-09-14 12:00:00" }, // no está en STATE_GROUPS
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.order.timeline.length, 3);
+    assert.deepEqual(
+      result.order.timeline.map((t) => t.stateId),
+      [STATE_A, STATE_B, 17]
+    );
+    assert.deepEqual(
+      result.order.timeline.map((t) => t.group),
+      ["A", "B", "D"]
+    );
+    assert.equal(result.order.timeline[0].date.toISOString(), new Date("2026-09-01T09:00:00Z").toISOString());
+  });
+
+  test("sin historial, timeline es un array vacío", async () => {
+    stub();
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+    assert.deepEqual(result.order.timeline, []);
+  });
+});
+
+// ─── Plazo prometido del transportista ────────────────────────────────────
+
+describe("consolidateOrder — carrierDelay", () => {
+  test("campo traducible: se resuelve al idioma del cliente", async () => {
+    stub({
+      orderCarriers: {
+        body: JSON.stringify({
+          order_carriers: [{ id: 1, id_order: ORDER_ID, id_carrier: 9, tracking_number: "US123456789" }],
+        }),
+      },
+      carriers: {
+        9: {
+          body: JSON.stringify({
+            carriers: [
+              {
+                id: 9,
+                name: "Colissimo International",
+                url: "http://www.laposte.fr/suivi/@",
+                delay: [
+                  { id: "1", value: "2 à 4 jours en France" },
+                  { id: "3", value: "5 a 9 días para el resto del mundo" },
+                ],
+              },
+            ],
+          }),
+        },
+      },
+    });
+
+    const result = await consolidateOrder(buildInput({ customer: baseCustomer({ idLang: 3 }) }), STATE_GROUPS);
+
+    assert.equal(result.shipping.carrierDelay, "5 a 9 días para el resto del mundo");
+  });
+
+  test("sin transportista conocido, carrierDelay es null", async () => {
+    stub();
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+    assert.equal(result.shipping.carrierDelay, null);
+  });
+});

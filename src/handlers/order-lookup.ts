@@ -311,6 +311,13 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
             shippingPaid: consolidation.order.totals.shippingPaid,
           },
           currency: consolidation.order.currency,
+          // Cuándo entró en cada estado. Responde "¿desde cuándo lleva así?", que es
+          // literalmente lo que pregunta el cliente cuando un pedido se queda quieto.
+          timeline: consolidation.order.timeline.map((change) => ({
+            stateId: change.stateId,
+            group: change.group,
+            date: change.date,
+          })),
         },
         customer: {
           firstname: consolidation.customer.firstname,
@@ -331,6 +338,8 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
           trackingUrl: consolidation.shipping.trackingUrl,
           shippedWithoutTracking: consolidation.shipping.shippedWithoutTracking,
           shippedAt: consolidation.shipping.shippedAt,
+          // Plazo que promete el transportista, ya resuelto al idioma del cliente.
+          carrierDelay: consolidation.shipping.carrierDelay,
         },
         refund:
           consolidation.refund === null
@@ -351,6 +360,17 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
           lastMessage: consolidation.conversation.lastMessage,
           lastMessageDate: consolidation.conversation.lastMessageDate,
           awaitingShopReply: consolidation.conversation.awaitingShopReply,
+          // Los últimos 10 mensajes reales de TODOS los hilos del pedido. Sin esto el
+          // agente no ve lo que ya se le dijo al cliente y se contradice: en el pedido
+          // YOGGHZYXI la tienda había prometido "2 à 5 jours ouvrés" cuando la tabla de
+          // plazos de la propia tienda dice 9 para esa marca.
+          messages: consolidation.conversation.messages.map((message) => ({
+            date: message.date,
+            author: message.author,
+            authorCertain: message.authorCertain,
+            text: message.text,
+            threadId: message.threadId,
+          })),
         },
         guidance: {
           situation: guidance.situation,

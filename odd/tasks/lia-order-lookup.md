@@ -417,6 +417,45 @@ transitorios y resueltos al reintentar. Las consultas normales tardan 350ms-1s. 
 respalda la decisión de T11 de mapear **cualquier** fallo de reglas a 503 y no a 500: no
 es un caso teórico, pasa varias veces por sesión.
 
+### Ampliación: el hilo, el timeline y el plazo del transportista
+
+Auditando el pedido YOGGHZYXI (22/09) se vio que el payload exponía solo el ÚLTIMO
+mensaje. Lia no podía ver que la tienda ya había contestado *"2 à 5 jours ouvrés"*
+cuando la tabla de plazos de la propia tienda dice **9 días** para Sloggi For Men —
+así que habría repetido el error o se habría contradicho.
+
+Se añadieron cuatro datos que ya se consultaban o existían y se descartaban:
+
+| Campo | Por qué |
+|---|---|
+| `conversation.messages` | Últimos 10 mensajes reales de **todos** los hilos del pedido, no solo del más reciente |
+| `order.timeline` | Cuándo entró en cada estado. En YOGGHZYXI responde justo lo que el cliente pregunta: lleva en "en cours de traitement" desde el 14/09 |
+| `shipping.carrierDelay` | El plazo que promete el transportista. Fue el dato que probaba el retraso en el pedido a EEUU |
+| Autoría inferida | Ver abajo |
+
+#### `id_employee` tampoco es fiable
+
+Tercera señal "obvia" que resulta no serlo, después de `private` y `current_state`. En
+el hilo 185221 hay un mensaje con `id_employee = 28` cuyo contenido es del cliente: se
+queja de su propio pedido y firma "Yamine Priem". Un empleado pegó el correo del
+cliente dentro del hilo.
+
+La autoría se deduce ahora por cascada sobre el contenido: nota del módulo de pago →
+`SYSTEM`; firma "service client" → `SHOP`; primera persona como comprador y sin firma
+de tienda → `CUSTOMER` **sin importar `id_employee`**; y si no hay ninguna señal, cae a
+`id_employee` pero marcando **`authorCertain: false`**. Exponer la incertidumbre en vez
+de fingir certeza es lo que impide que el próximo fallo sea silencioso.
+
+#### Y el bug de tipos, dos veces más
+
+`order_histories.id_order_state` y `customer_messages.id_customer_thread` también
+llegan como **string**. Sin normalizar, el timeline habría dado grupo `"D"` en todas
+las entradas —justo el dato que se quería exponer— y `threadId` habría viajado como
+texto. Van siete apariciones de la misma causa raíz.
+
+Verificado contra el handler HTTP real con el pedido YOGGHZYXI: HTTP 200, timeline con
+grupo `A`, `carrierDelay` en francés, y el correo pegado clasificado como `CUSTOMER`.
+
 ### Pendiente, y no depende de código
 1. **Los 8 `body` de plantilla** siguen vacíos: los textos están en
    `scenario_lia.numbers`, hoja Feuil2, que no está en el repositorio.
