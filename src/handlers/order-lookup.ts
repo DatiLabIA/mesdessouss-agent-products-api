@@ -342,6 +342,10 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
           covered: line.covered,
         })),
         shipping: {
+          // Siempre "OUTBOUND": ver el JSDoc de `ConsolidatedShipping.direction`. Se lista
+          // explícitamente, igual que el resto de los campos de este objeto, para que un
+          // agente nunca la confunda con el seguimiento de un retorno (§ conversación VJWIRCHVQ).
+          direction: consolidation.shipping.direction,
           carrierName: consolidation.shipping.carrierName,
           trackingNumber: consolidation.shipping.trackingNumber,
           trackingUrl: consolidation.shipping.trackingUrl,

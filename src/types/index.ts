@@ -222,6 +222,13 @@ export interface OrderLookupLineView {
 }
 
 export interface OrderLookupShippingView {
+  /**
+   * Siempre `OUTBOUND`: es el envío de la tienda AL cliente. El servicio no puede ver los envíos de
+   * retorno (`order_returns` no existe en el webservice), así que nunca hay un tracking de vuelta
+   * acá. Se etiqueta explícitamente porque un agente con una pregunta sobre retornos delante
+   * confundió los dos.
+   */
+  direction: "OUTBOUND";
   carrierName: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;

@@ -579,6 +579,134 @@ describe("buildGuidance", () => {
     assert.deepEqual(guidance.must_not_claim, plantilla.mustNotClaim);
   });
 
+  // ─── returnDataAvailable: prohibición de confundir tracking de ida con retorno ──
+  //
+  // Fallo real de producción (conversación VJWIRCHVQ): la clienta preguntó por su
+  // retorno, la tool devolvió `tracking_url`/`order_reference` (el envío DE IDA) y
+  // nada en `must_not_claim` prohibía presentarlo como el seguimiento del retorno.
+  // El agente lo hizo, dos veces. Estos tests verifican que, mientras el servicio
+  // no pueda ver `order_returns`, la prohibición se agrega SIEMPRE, sin importar
+  // qué plantilla ganó ni si el pedido termina escalando.
+
+  const RETURN_TRACKING_PROHIBITION =
+    "must not present the outbound tracking number as tracking for the customer's return";
+  const RETURN_STATUS_PROHIBITION =
+    "must not state the status of a return in progress: this service cannot see returns that have not " +
+    "been completed, so hand over to a human instead";
+
+  describe("buildGuidance — prohibición de retorno (returnDataAvailable)", () => {
+    test("MAIL_3 con returnDataAvailable false: must_not_claim agrega las dos prohibiciones a las de la plantilla", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_3",
+        matchedRule: { priority: 8, note: "nota" },
+        escalateReason: null,
+      };
+      const order: GuidanceOrderContext = { ...baseOrder, trackingUrl: "https://exemple.test/suivi/ABC" };
+      const guidance = buildGuidance(evaluation, baseFacts({ hasTracking: true }), order, ruleTemplateSeed, {
+        returnDataAvailable: false,
+      });
+      const plantilla = ruleTemplateSeed.find((t) => t.outcome === "MAIL_3")!;
+      assert.deepEqual(guidance.must_not_claim, [
+        ...plantilla.mustNotClaim,
+        RETURN_TRACKING_PROHIBITION,
+        RETURN_STATUS_PROHIBITION,
+      ]);
+      // No es un efecto secundario de escalar: MAIL_3 sigue resuelto normalmente.
+      assert.equal(guidance.must_escalate, false);
+    });
+
+    test("MAIL_1 con returnDataAvailable false: must_not_claim agrega las dos prohibiciones", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_1",
+        matchedRule: { priority: 1, note: "nota" },
+        escalateReason: null,
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+        returnDataAvailable: false,
+      });
+      const plantilla = ruleTemplateSeed.find((t) => t.outcome === "MAIL_1")!;
+      assert.deepEqual(guidance.must_not_claim, [
+        ...plantilla.mustNotClaim,
+        RETURN_TRACKING_PROHIBITION,
+        RETURN_STATUS_PROHIBITION,
+      ]);
+    });
+
+    test("MAIL_12 con returnDataAvailable false: must_not_claim agrega las dos prohibiciones a las propias del reembolso", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_12",
+        matchedRule: null,
+        escalateReason: null,
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        returnDataAvailable: false,
+      });
+      const plantilla = ruleTemplateSeed.find((t) => t.outcome === "MAIL_12")!;
+      assert.deepEqual(guidance.must_not_claim, [
+        ...plantilla.mustNotClaim,
+        RETURN_TRACKING_PROHIBITION,
+        RETURN_STATUS_PROHIBITION,
+      ]);
+    });
+
+    test("ESCALATE con returnDataAvailable false: las dos prohibiciones llegan igual, aunque no haya plantilla", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "ESCALATE",
+        matchedRule: null,
+        escalateReason: "motivo de prueba",
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+        returnDataAvailable: false,
+      });
+      assert.equal(guidance.must_escalate, true);
+      assert.deepEqual(guidance.must_not_claim, [RETURN_TRACKING_PROHIBITION, RETURN_STATUS_PROHIBITION]);
+    });
+
+    test("must_escalate true por datos faltantes (no por ESCALATE de la matriz) con returnDataAvailable false: mismo comportamiento", () => {
+      // MAIL_3 sin tracking_url resuelto: escala por dato faltante (§7.4), no porque
+      // la matriz haya dicho ESCALATE. La prohibición de retorno se agrega igual.
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_3",
+        matchedRule: { priority: 8, note: "nota" },
+        escalateReason: null,
+      };
+      const order: GuidanceOrderContext = { ...baseOrder, trackingUrl: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ hasTracking: true }), order, ruleTemplateSeed, {
+        returnDataAvailable: false,
+      });
+      assert.equal(guidance.must_escalate, true);
+      assert.ok(guidance.must_not_claim.includes(RETURN_TRACKING_PROHIBITION));
+      assert.ok(guidance.must_not_claim.includes(RETURN_STATUS_PROHIBITION));
+    });
+
+    test("returnDataAvailable true: no agrega ninguna prohibición de retorno", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_1",
+        matchedRule: { priority: 1, note: "nota" },
+        escalateReason: null,
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+        returnDataAvailable: true,
+      });
+      const plantilla = ruleTemplateSeed.find((t) => t.outcome === "MAIL_1")!;
+      assert.deepEqual(guidance.must_not_claim, plantilla.mustNotClaim);
+      assert.ok(!guidance.must_not_claim.includes(RETURN_TRACKING_PROHIBITION));
+      assert.ok(!guidance.must_not_claim.includes(RETURN_STATUS_PROHIBITION));
+    });
+
+    test("returnDataAvailable ausente (default): no agrega ninguna prohibición de retorno", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_1",
+        matchedRule: { priority: 1, note: "nota" },
+        escalateReason: null,
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed);
+      assert.ok(!guidance.must_not_claim.includes(RETURN_TRACKING_PROHIBITION));
+      assert.ok(!guidance.must_not_claim.includes(RETURN_STATUS_PROHIBITION));
+    });
+  });
+
   test("reply_language: id_lang 1/2/3 resuelven a fr/en/es", () => {
     const evaluation: RuleEvaluationResult = {
       outcome: "MAIL_1",

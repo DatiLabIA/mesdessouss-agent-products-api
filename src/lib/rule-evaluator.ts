@@ -228,7 +228,27 @@ export interface GuidanceExtraContext {
   pendingProducts?: string | null;
   additionalDelay?: string | null;
   processedDate?: Date | null;
+  /**
+   * `false` mientras el webservice no exponga `order_returns` (ver `ConsolidatedReturn.dataAvailable`
+   * en `order-consolidation.ts`). Cuando es exactamente `false`, `buildGuidance` agrega las dos
+   * prohibiciones de `RETURN_TRACKING_PROHIBITION`/`RETURN_STATUS_PROHIBITION` a `must_not_claim`,
+   * sea cual sea el desenlace. `true` o `undefined` no agregan nada: el día que exista el módulo que
+   * exponga los retornos, esta prohibición desaparece sola en cuanto el llamador pase `true`.
+   */
+  returnDataAvailable?: boolean;
 }
+
+/**
+ * Prohibiciones agregadas por `buildGuidance` cuando `extra.returnDataAvailable === false` (§ hallazgo
+ * de producción, conversación VJWIRCHVQ: el agente presentó el tracking de ida como si fuera el de la
+ * devolución, dos veces, porque nada en `must_not_claim` lo prohibía). En inglés, como el resto de
+ * `must_not_claim` sembrado: lo lee Lia, no el equipo.
+ */
+const RETURN_TRACKING_PROHIBITION =
+  "must not present the outbound tracking number as tracking for the customer's return";
+const RETURN_STATUS_PROHIBITION =
+  "must not state the status of a return in progress: this service cannot see returns that have not " +
+  "been completed, so hand over to a human instead";
 
 /**
  * El bloque que Lia recibe para redactar la respuesta al cliente. `situation`
@@ -377,6 +397,15 @@ export function buildGuidance(
     }
   }
 
+  // Se agrega siempre que `returnDataAvailable` sea exactamente `false`, sin importar el desenlace
+  // (incluido ESCALATE, donde `template` es `null` y `must_not_claim` arranca vacío): el fallo de
+  // producción que motivó esto fue precisamente un MAIL_3 con `must_not_claim` sembrado, pero sin
+  // ninguna fila sobre retornos. Nunca depender de qué plantilla ganó para proteger este dato.
+  const mustNotClaim = [...(template?.mustNotClaim ?? [])];
+  if (extra.returnDataAvailable === false) {
+    mustNotClaim.push(RETURN_TRACKING_PROHIBITION, RETURN_STATUS_PROHIBITION);
+  }
+
   const mustEscalate = isRuleEscalate || missingTemplate || missingFacts.length > 0;
 
   let escalateReason: string | null = null;
@@ -399,7 +428,7 @@ export function buildGuidance(
     escalate_reason: escalateReason,
     reply_language: resolveReplyLanguage(order.idLang),
     facts_to_convey: factsToConvey,
-    must_not_claim: template?.mustNotClaim ?? [],
+    must_not_claim: mustNotClaim,
     reference_template: template?.outcome ?? null,
     template_text: template !== null && template.body.trim().length > 0 ? template.body : null,
     missing_facts: missingFacts,

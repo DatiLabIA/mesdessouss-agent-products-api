@@ -255,6 +255,10 @@ describe("consolidateOrder — camino feliz", () => {
     assert.equal(result.shipping.trackingUrl, "http://www.laposte.fr/suivi/8Q004677948");
     assert.equal(result.shipping.carrierName, "Colissimo");
     assert.equal(result.shipping.shippedWithoutTracking, false);
+    // Siempre OUTBOUND: es el envío de la tienda al cliente, nunca el de un
+    // retorno (el servicio no puede ver order_returns). Ver el fallo real de
+    // producción documentado en ConsolidatedShipping.direction.
+    assert.equal(result.shipping.direction, "OUTBOUND");
 
     assert.equal(result.order.group, "B");
     assert.equal(result.order.status.id, STATE_B);
@@ -557,6 +561,17 @@ describe("consolidateOrder — reembolso", () => {
 
 // ─── Retorno ──────────────────────────────────────────────────────────────
 
+/**
+ * Texto nuevo de `return.reason` (§ fallo real de producción, conversación VJWIRCHVQ): en inglés,
+ * dirigido al agente, dice qué puede y qué no puede hacer en vez de explicar el motivo interno en
+ * español. Se compara literal porque es exactamente lo que Lia lee para decidir su respuesta.
+ */
+const RETURN_REASON =
+  "Returns in progress are not visible to this service: only a completed return can be detected, " +
+  "through the order state. If the customer asks about a return that is under way, say plainly that " +
+  "you cannot see its status and hand over to a human. Never use the shipping tracking number as if " +
+  "it were the return's.";
+
 describe("consolidateOrder — retorno", () => {
   test("estado 61 (Retour Terminé): completed true, dataAvailable siempre false", async () => {
     stub({ orderState: { body: JSON.stringify({ order_states: [{ id: STATE_RETURN, name: "Retour Terminé" }] }) } });
@@ -565,7 +580,7 @@ describe("consolidateOrder — retorno", () => {
 
     assert.equal(result.return.completed, true);
     assert.equal(result.return.dataAvailable, false);
-    assert.ok(result.return.reason.length > 0);
+    assert.equal(result.return.reason, RETURN_REASON);
   });
 
   test("un estado distinto de 61: completed false, dataAvailable sigue en false", async () => {
@@ -575,6 +590,23 @@ describe("consolidateOrder — retorno", () => {
 
     assert.equal(result.return.completed, false);
     assert.equal(result.return.dataAvailable, false);
+  });
+
+  test("return.reason es el texto nuevo dirigido al agente, en inglés", async () => {
+    stub();
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.return.reason, RETURN_REASON);
+  });
+
+  test("extraContext.returnDataAvailable viaja con el mismo valor que return.dataAvailable", async () => {
+    stub();
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.extraContext.returnDataAvailable, result.return.dataAvailable);
+    assert.equal(result.extraContext.returnDataAvailable, false);
   });
 });
 

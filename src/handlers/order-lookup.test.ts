@@ -461,6 +461,13 @@ describe("POST /order_lookup — camino feliz", () => {
     assert.ok(body.conversation);
     assert.ok(body.guidance);
 
+    // `direction` es siempre "OUTBOUND": este endpoint es exactamente lo que consume el
+    // agente, así que si el campo no llegara acá (whitelist explícita del handler), Lia
+    // seguiría sin poder distinguir el tracking de ida del de un retorno (§ fallo real de
+    // producción, conversación VJWIRCHVQ).
+    const shipping = body.shipping as Record<string, unknown>;
+    assert.equal(shipping.direction, "OUTBOUND");
+
     const guidance = body.guidance as Record<string, unknown>;
     assert.equal(guidance.situation, "MAIL_1");
     assert.equal(guidance.can_answer, true);

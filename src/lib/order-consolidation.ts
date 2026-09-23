@@ -244,12 +244,18 @@ const ORDER_PAYMENT_FIELDS = ["id", "amount", "payment_method", "card_number", "
 /** Estado 61 "Retour Terminé": la única señal fiable de retorno físico completado (§ hallazgos de la tarea). */
 const RETURN_COMPLETED_STATE_ID = 61;
 
-/** El webservice no expone `order_returns`; se documenta el motivo en vez de fingir el dato. */
+/**
+ * El webservice no expone `order_returns`; en vez de fingir el dato, se documenta acá la limitación,
+ * en inglés y dirigida al agente (§ hallazgo de producción: un agente con una pregunta sobre un
+ * retorno en curso presentó el tracking DE IDA como si fuera el de la devolución, dos veces, en la
+ * conversación VJWIRCHVQ). El texto anterior explicaba el porqué en español y para el equipo; este
+ * le dice a Lia qué puede y qué no puede hacer.
+ */
 const RETURN_DATA_UNAVAILABLE_REASON =
-  "El recurso order_returns no existe en el webservice de PrestaShop: no hay forma de leer el estado " +
-  "físico de la devolución. `completed` se deriva únicamente de current_state === 61 (Retour Terminé), " +
-  "la única señal verificada como fiable; el motivo de stock (motivo 10) no sirve, cubre un tercio de " +
-  "los casos y se dispara también con pedidos anulados.";
+  "Returns in progress are not visible to this service: only a completed return can be detected, " +
+  "through the order state. If the customer asks about a return that is under way, say plainly that " +
+  "you cannot see its status and hand over to a human. Never use the shipping tracking number as if " +
+  "it were the return's.";
 
 /**
  * Moneda de la tienda. El pedido solo trae `id_currency`; resolver el código ISO exigiría un recurso
@@ -484,6 +490,13 @@ export interface ConsolidatedLine {
 }
 
 export interface ConsolidatedShipping {
+  /**
+   * Siempre `OUTBOUND`: es el envío de la tienda AL cliente. El servicio no puede
+   * ver los envíos de retorno (`order_returns` no existe en el webservice), así que
+   * nunca hay un tracking de vuelta acá. Se etiqueta explícitamente porque un
+   * agente con una pregunta sobre retornos delante confundió los dos.
+   */
+  direction: "OUTBOUND";
   carrierName: string | null;
   /** `null` si no hay número real en ninguna de las dos fuentes (`orders.shipping_number` u `order_carriers.tracking_number`). */
   trackingNumber: string | null;
@@ -753,6 +766,7 @@ function computeShipping(
   const carrierDelay = resolvedDelay !== null && !isBlank(resolvedDelay) ? resolvedDelay : null;
 
   return {
+    direction: "OUTBOUND",
     carrierName: sourceCarrier?.name ?? null,
     trackingNumber,
     trackingUrl,
@@ -1194,10 +1208,17 @@ export async function consolidateOrder(
     trackingUrl: shipping.trackingUrl,
   };
 
+  // Mismo valor que `return.dataAvailable` más abajo: una sola fuente de verdad para
+  // que `buildGuidance` sepa que no puede verse el estado de un retorno en curso. El
+  // día que exista un módulo que exponga `order_returns`, este valor pasa a `true` y
+  // la prohibición que agrega `buildGuidance` en `must_not_claim` deja de aplicarse sola.
+  const returnDataAvailable: false = false;
+
   const extraContext: GuidanceExtraContext = {
     pendingProducts: null,
     additionalDelay: null,
     processedDate: refund?.processedDate ?? null,
+    returnDataAvailable,
   };
 
   return {
@@ -1228,7 +1249,7 @@ export async function consolidateOrder(
     shipping,
     refund,
     return: {
-      dataAvailable: false,
+      dataAvailable: returnDataAvailable,
       reason: RETURN_DATA_UNAVAILABLE_REASON,
       completed: currentStateId === RETURN_COMPLETED_STATE_ID,
     },
