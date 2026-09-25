@@ -651,7 +651,7 @@ export function createMcpServer(): McpServer {
   // ─── set_template ────────────────────────────────────────────────────────
   server.tool(
     "set_template",
-    "Da de alta o actualiza la plantilla de un desenlace (outcome), dentro de un BORRADOR (create_rule_draft primero): el texto base aprobado, los datos que Lia tiene que transmitir (facts_to_convey) y las afirmaciones que tiene prohibido hacer (must_not_claim). Alta o actualización (upsert) por outcome+lang. No se puede editar el conjunto activo.",
+    "Da de alta o actualiza la plantilla de un desenlace (outcome), dentro de un BORRADOR (create_rule_draft primero): el texto base aprobado, los datos que Lia tiene que transmitir (facts_to_convey), las afirmaciones que tiene prohibido hacer (must_not_claim) y si el desenlace tiene que marcarse para que el equipo lo revise (notify_team). Alta o actualización (upsert) por outcome+lang. No se puede editar el conjunto activo.",
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
       outcome: z.enum(RULE_OUTCOMES).describe("Desenlace al que corresponde esta plantilla."),
@@ -661,10 +661,18 @@ export function createMcpServer(): McpServer {
         .array(z.string())
         .describe("Claves de los datos que Lia tiene que transmitir en este desenlace (ej: 'order_reference', 'tracking_url')."),
       mustNotClaim: z.array(z.string()).describe("Afirmaciones que Lia tiene prohibido hacer para este desenlace."),
+      notifyTeam: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Si este desenlace tiene que marcarse para que el equipo lo revise (viaja como guidance.notify_team). " +
+            "Esto SOLO pone la bandera: el servicio nunca envía ninguna notificación por su cuenta. Por defecto false."
+        ),
     },
-    async ({ version, outcome, lang, body, factsToConvey, mustNotClaim }) => {
+    async ({ version, outcome, lang, body, factsToConvey, mustNotClaim, notifyTeam }) => {
       try {
-        await setTemplate(CLIENT_ID, version, { outcome, lang, body, factsToConvey, mustNotClaim });
+        await setTemplate(CLIENT_ID, version, { outcome, lang, body, factsToConvey, mustNotClaim, notifyTeam });
         return { content: [{ type: "text", text: `✓ Plantilla ${outcome}/${lang} guardada en el borrador v${version}.` }] };
       } catch (err) {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {

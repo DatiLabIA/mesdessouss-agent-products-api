@@ -106,6 +106,25 @@ describe("integridad de la matriz", () => {
     }
   });
 
+  test("MAIL_8 es la única plantilla sembrada sin fila propia en la matriz, a propósito (T4)", () => {
+    // El resto de plantillas sembradas corresponden 1:1 a una fila real de la matriz. MAIL_8
+    // (retorno en curso, texto A.5) es la excepción deliberada: `order_lookup` no sabe si la
+    // pregunta del cliente es sobre una devolución, así que `buildGuidance` la entrega siempre
+    // como el bloque adicional `return_inquiry`, nunca como el desenlace principal (§ JSDoc de
+    // `RuleOutcome` en este fichero). Este test documenta esa excepción en vez de dejarla pasar
+    // en silencio: si alguna otra plantilla queda huérfana en el futuro, debe fallar acá.
+    const outcomesConFila = new Set(ruleDecisionSeed.map((r) => r.outcome));
+    const plantillasHuerfanas = ruleTemplateSeed.filter((t) => !outcomesConFila.has(t.outcome));
+    assert.deepEqual(plantillasHuerfanas.map((t) => t.outcome), ["MAIL_8"]);
+  });
+
+  test("notifyTeam: solo MAIL_15 lo pide, ninguna otra plantilla sembrada (T4)", () => {
+    // Guarda de regresión concreta: MAIL_15 es el único texto sembrado que promete un seguimiento
+    // del equipo ("nous reviendrons vers vous dans un délai de 48 heures ouvrées", § hallazgo 7).
+    const conNotifyTeam = ruleTemplateSeed.filter((t) => t.notifyTeam).map((t) => t.outcome);
+    assert.deepEqual(conNotifyTeam, ["MAIL_15"]);
+  });
+
   test("los grupos de estado sembrados son los verificados contra PrestaShop", () => {
     const porGrupo = new Map<string, number[]>();
     for (const s of stateGroupSeed) {

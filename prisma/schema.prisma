@@ -230,6 +230,11 @@ model RuleTemplate {
   factsToConvey Json    @map("facts_to_convey")
   /// string[] — afirmaciones prohibidas para este desenlace
   mustNotClaim  Json    @map("must_not_claim")
+  /// T4: si este desenlace tiene que marcarse para que el equipo lo revise (ej. MAIL_15, que promete
+  /// "nous reviendrons vers vous dans un délai de 48 heures"). Esto SOLO pone la bandera —
+  /// `guidance.notify_team` en el payload de order_lookup—; la notificación real (Zimbra u otra) se
+  /// habilita en otro lugar, fuera de esta tarea (decisión del usuario).
+  notifyTeam    Boolean @default(false) @map("notify_team")
 
   @@unique([ruleSetId, outcome, lang])
   @@map("rule_templates")

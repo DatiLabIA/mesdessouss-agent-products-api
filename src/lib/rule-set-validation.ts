@@ -88,6 +88,7 @@ export const RULE_OUTCOMES = [
   "MAIL_5",
   "MAIL_6",
   "MAIL_7",
+  "MAIL_8",
   "MAIL_10",
   "MAIL_12",
   "MAIL_15",
@@ -160,6 +161,13 @@ export interface RawTemplateRow {
   body: string;
   factsToConvey: unknown;
   mustNotClaim: unknown;
+  /**
+   * T4. Opcional: una fila cruda de un conjunto sembrado ANTES de T4 (la migración que agrega la
+   * columna la backfillea a `false` en base, pero una fila fabricada a mano — tests, u otra fuente
+   * futura — podría seguir sin traerla) no debe romper la carga. `parseTemplates` la trata como
+   * `false` cuando falta, nunca como un dato faltante que escale.
+   */
+  notifyTeam?: boolean;
 }
 
 export interface RawSettingRow {
@@ -206,6 +214,10 @@ const templateRowSchema = z.object({
   body: z.string(),
   factsToConvey: z.array(z.string()),
   mustNotClaim: z.array(z.string()),
+  // `.default(false)` (T4): una fila sin la columna (conjunto sembrado antes de T4, o una fila
+  // fabricada a mano sin pensar en el campo nuevo) se trata como "no notifica al equipo", nunca
+  // como un dato inválido — ver el JSDoc de `RawTemplateRow.notifyTeam`.
+  notifyTeam: z.boolean().optional().default(false),
 });
 
 const settingRowSchema = z.object({

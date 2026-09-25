@@ -1080,16 +1080,18 @@ describe("buildGuidance", () => {
   });
 
   test("template_text es null cuando el body sembrado está vacío (pendiente de fuente externa)", () => {
+    // MAIL_1 (§ T4: texto A.2) y MAIL_15 (§ T4: texto A.1) ya no sirven de ejemplo de "vacío": se
+    // sembraron sus cuerpos. MAIL_2 sigue pendiente de scenario_lia.numbers.
     const evaluation: RuleEvaluationResult = {
-      outcome: "MAIL_1",
-      matchedRule: { priority: 1, note: "nota" },
+      outcome: "MAIL_2",
+      matchedRule: { priority: 3, note: "nota" },
       escalateReason: null,
     };
     const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed);
     assert.equal(guidance.template_text, null);
   });
 
-  test("template_text trae el body cuando existe (mail 4, el único redactado en el documento)", () => {
+  test("template_text trae el body cuando existe (mail 4, el único redactado en el documento original)", () => {
     const evaluation: RuleEvaluationResult = {
       outcome: "MAIL_4",
       matchedRule: { priority: 5, note: "nota" },
@@ -1116,5 +1118,179 @@ describe("buildGuidance", () => {
     const escalado: RuleEvaluationResult = { outcome: "ESCALATE", matchedRule: null, escalateReason: "motivo" };
     const guidanceEscalado = buildGuidance(escalado, baseFacts(), baseOrder, ruleTemplateSeed);
     assert.equal(guidanceEscalado.reference_template, null);
+  });
+});
+
+// ─── buildGuidance — notify_team (T4) ───────────────────────────────────
+
+describe("buildGuidance — notify_team", () => {
+  const resueltoMail1: RuleEvaluationResult = {
+    outcome: "MAIL_1",
+    matchedRule: { priority: 2, note: "nota" },
+    escalateReason: null,
+  };
+  const resueltoMail15: RuleEvaluationResult = {
+    outcome: "MAIL_15",
+    matchedRule: { priority: 4, note: "nota" },
+    escalateReason: null,
+  };
+
+  test("plantilla con notifyTeam=false y sin escalar: notify_team false", () => {
+    const guidance = buildGuidance(resueltoMail1, baseFacts(), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.must_escalate, false);
+    assert.equal(guidance.notify_team, false);
+  });
+
+  test("MAIL_15 (notifyTeam=true en la siembra real) sin escalar: notify_team true", () => {
+    const guidance = buildGuidance(resueltoMail15, baseFacts(), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.must_escalate, false);
+    assert.equal(guidance.notify_team, true);
+  });
+
+  test("ESCALATE de la matriz: notify_team true aunque no haya plantilla (un caso escalado siempre necesita al equipo)", () => {
+    const escalado: RuleEvaluationResult = { outcome: "ESCALATE", matchedRule: null, escalateReason: "motivo" };
+    const guidance = buildGuidance(escalado, baseFacts(), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.notify_team, true);
+  });
+
+  test("escala por dato faltante (plantilla con notifyTeam=false): notify_team true igual", () => {
+    // MAIL_3 exige tracking_url; sin él en el order context, escala por dato faltante aunque su
+    // plantilla no pida notifyTeam.
+    const resueltoMail3: RuleEvaluationResult = {
+      outcome: "MAIL_3",
+      matchedRule: { priority: 9, note: "nota" },
+      escalateReason: null,
+    };
+    const guidance = buildGuidance(resueltoMail3, baseFacts({ hasTracking: true }), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.must_escalate, true);
+    assert.equal(guidance.notify_team, true);
+  });
+});
+
+// ─── buildGuidance — return_inquiry (mail 8, T4) ─────────────────────────
+
+describe("buildGuidance — return_inquiry", () => {
+  const resueltoMail1: RuleEvaluationResult = {
+    outcome: "MAIL_1",
+    matchedRule: { priority: 2, note: "nota" },
+    escalateReason: null,
+  };
+
+  test("grupo A (no R ni F) con MAIL_8 sembrado: se ofrece return_inquiry con el texto A.5", () => {
+    const guidance = buildGuidance(resueltoMail1, baseFacts({ stateGroup: "A" }), baseOrder, ruleTemplateSeed);
+    assert.ok(guidance.return_inquiry);
+    assert.equal(guidance.return_inquiry!.reference_template, "MAIL_8");
+    assert.match(guidance.return_inquiry!.template_text!, /colis retour n'a pas encore été traité/);
+    assert.match(guidance.return_inquiry!.instruction, /only if the customer explicitly asks/);
+  });
+
+  test("se ofrece igual aunque el desenlace principal escale (aditivo, mismo patrón que returnDataAvailable/refund)", () => {
+    const escalado: RuleEvaluationResult = { outcome: "ESCALATE", matchedRule: null, escalateReason: "motivo" };
+    const guidance = buildGuidance(escalado, baseFacts({ stateGroup: "C", hasTracking: false }), baseOrder, ruleTemplateSeed);
+    assert.ok(guidance.return_inquiry);
+  });
+
+  test("grupo R (retorno terminado): no se ofrece, ya tiene su propio desenlace", () => {
+    const resueltoMail12: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: { priority: 0, note: "nota" }, escalateReason: null };
+    const guidance = buildGuidance(
+      resueltoMail12,
+      baseFacts({ stateGroup: "R", refundIssued: true }),
+      baseOrder,
+      ruleTemplateSeed,
+      { processedDate: utc(2026, 5, 1), refund: { type: "MONEY", voucherExpiresAt: null, lineNames: [] } }
+    );
+    assert.equal(guidance.return_inquiry, undefined);
+  });
+
+  test("grupo F (reembolso): no se ofrece", () => {
+    const resueltoRefund: RuleEvaluationResult = { outcome: "MAIL_REFUND", matchedRule: { priority: 13, note: "nota" }, escalateReason: null };
+    const guidance = buildGuidance(resueltoRefund, baseFacts({ stateGroup: "F" }), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.return_inquiry, undefined);
+  });
+
+  test("conjunto de reglas SIN plantilla MAIL_8 (conjunto viejo, previo a T4): se omite el campo entero, nunca se inventa el texto", () => {
+    const plantillasSinMail8 = ruleTemplateSeed.filter((t) => t.outcome !== "MAIL_8");
+    const guidance = buildGuidance(resueltoMail1, baseFacts({ stateGroup: "A" }), baseOrder, plantillasSinMail8);
+    assert.equal(guidance.return_inquiry, undefined);
+    assert.ok(!("return_inquiry" in guidance) || guidance.return_inquiry === undefined);
+  });
+
+  test("plantilla MAIL_8 con body vacío: template_text es null, nunca una cadena vacía inventada", () => {
+    const plantillaVacia: RuleTemplateSeed[] = [
+      ...ruleTemplateSeed.filter((t) => t.outcome !== "MAIL_8"),
+      { outcome: "MAIL_8", lang: "fr", body: "", factsToConvey: [], mustNotClaim: [], notifyTeam: false },
+    ];
+    const guidance = buildGuidance(resueltoMail1, baseFacts({ stateGroup: "A" }), baseOrder, plantillaVacia);
+    assert.ok(guidance.return_inquiry);
+    assert.equal(guidance.return_inquiry!.template_text, null);
+  });
+});
+
+// ─── Compatibilidad hacia atrás con el conjunto ACTIVO viejo (T4) ────────
+//
+// El conjunto activo hoy en base se sembró con la versión ANTERIOR de order-rules-seed.ts (T1/T2),
+// antes de T3/T4. `prisma migrate deploy` agrega las columnas antes de arrancar (`start:prod`), pero
+// las FILAS de ese conjunto no cambian hasta que alguien publique uno nuevo: sus filas del grupo C
+// siguen usando `historyHasInfo`, y sus plantillas no traen `notifyTeam` ni existe ninguna MAIL_8.
+// Estos tests fijan que evaluateRules/buildGuidance siguen funcionando igual contra esa forma vieja.
+
+describe("compatibilidad hacia atrás: conjunto de reglas con forma anterior a T3/T4", () => {
+  /** Las dos filas de grupo C tal como las sembraba el código antes de T3 (historyHasInfo, no hasTracking). */
+  const oldShapeGroupCRows: RuleDecisionSeed[] = [
+    {
+      priority: 11,
+      stateGroup: "C",
+      stockStatus: null,
+      brandCount: null,
+      delayBucket: null,
+      hasTracking: null,
+      historyHasInfo: true,
+      refundIssued: null,
+      outcome: "MAIL_6",
+      note: "fila vieja, previa a T3",
+    },
+    {
+      priority: 12,
+      stateGroup: "C",
+      stockStatus: null,
+      brandCount: null,
+      delayBucket: null,
+      hasTracking: null,
+      historyHasInfo: false,
+      refundIssued: null,
+      outcome: "MAIL_7",
+      note: "fila vieja, previa a T3",
+    },
+  ];
+
+  test("las filas viejas del grupo C se siguen evaluando igual que antes de T3 (matriz genérica, sin cambios de evaluateRules)", () => {
+    const conInfo = evaluateRules(baseFacts({ stateGroup: "C", historyHasInfo: true }), oldShapeGroupCRows);
+    assert.equal(conInfo.outcome, "MAIL_6");
+
+    const sinInfo = evaluateRules(baseFacts({ stateGroup: "C", historyHasInfo: false }), oldShapeGroupCRows);
+    assert.equal(sinInfo.outcome, "MAIL_7");
+
+    // Y el mismo bug que T3 arregló en la siembra actual sigue reproducible con la forma vieja: un
+    // mensaje real (historyHasInfo: null) no matchea ninguna de las dos filas.
+    const conMensajeReal = evaluateRules(baseFacts({ stateGroup: "C", historyHasInfo: null }), oldShapeGroupCRows);
+    assert.equal(conMensajeReal.outcome, "ESCALATE");
+  });
+
+  test("plantillas sin notifyTeam (conjunto viejo): notify_team se resuelve false salvo que el caso escale", () => {
+    const oldShapeTemplates: RuleTemplateSeed[] = [
+      { outcome: "MAIL_1", lang: "fr", body: "", factsToConvey: ["order_reference"], mustNotClaim: [], notifyTeam: false },
+    ];
+    const resuelto: RuleEvaluationResult = { outcome: "MAIL_1", matchedRule: { priority: 2, note: "nota" }, escalateReason: null };
+    const guidance = buildGuidance(resuelto, baseFacts(), baseOrder, oldShapeTemplates);
+    assert.equal(guidance.notify_team, false);
+  });
+
+  test("conjunto viejo sin ninguna plantilla MAIL_8: return_inquiry se omite, nunca se inventa (missing MAIL_8 → no return_inquiry)", () => {
+    const oldShapeTemplates: RuleTemplateSeed[] = [
+      { outcome: "MAIL_1", lang: "fr", body: "", factsToConvey: ["order_reference"], mustNotClaim: [], notifyTeam: false },
+    ];
+    const resuelto: RuleEvaluationResult = { outcome: "MAIL_1", matchedRule: { priority: 2, note: "nota" }, escalateReason: null };
+    const guidance = buildGuidance(resuelto, baseFacts({ stateGroup: "A" }), baseOrder, oldShapeTemplates);
+    assert.equal(guidance.return_inquiry, undefined);
   });
 });

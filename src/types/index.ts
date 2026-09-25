@@ -303,6 +303,17 @@ export interface OrderLookupGuidanceFactView {
   value: string;
 }
 
+/**
+ * Bloque adicional (T4) con el texto del mail 8 para cuando el cliente pregunte por una devolución
+ * de este pedido. Ver el JSDoc de `GuidanceReturnInquiry` en `rule-evaluator.ts`: aditivo, y ausente
+ * (nunca `null`) cuando no aplica o el conjunto de reglas activo no tiene plantilla MAIL_8.
+ */
+export interface OrderLookupReturnInquiryView {
+  reference_template: "MAIL_8";
+  template_text: string | null;
+  instruction: string;
+}
+
 /** El bloque que Lia usa para redactar la respuesta al cliente. */
 export interface OrderLookupGuidanceView {
   situation: string;
@@ -315,6 +326,12 @@ export interface OrderLookupGuidanceView {
   reference_template: string | null;
   template_text: string | null;
   missing_facts: string[];
+  /**
+   * T4: si este pedido tiene que marcarse para que el equipo lo revise. Nunca dispara ninguna
+   * notificación por sí solo — ver el JSDoc de `GuidanceBlock.notify_team` en `rule-evaluator.ts`.
+   */
+  notify_team: boolean;
+  return_inquiry?: OrderLookupReturnInquiryView;
 }
 
 /** Camino feliz: identidad verificada y regla resuelta. */

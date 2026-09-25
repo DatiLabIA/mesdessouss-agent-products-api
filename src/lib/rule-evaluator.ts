@@ -307,6 +307,32 @@ const VOUCHER_REFUND_PROHIBITION =
 const MONEY_REFUND_PROHIBITION = "must not describe this refund as a voucher or store credit (avoir)";
 
 /**
+ * Desenlace de la plantilla del mail 8 (retorno aún no tratado, texto A.5 del Anexo A de
+ * docs/hallazgos-conversaciones-flow-test.md). Nunca es un `situation`/`reference_template`
+ * principal: ninguna fila de la matriz lo selecciona (§ JSDoc de `RuleOutcome` en
+ * order-rules-seed.ts). `buildGuidance` lo busca por este outcome y, si existe, lo ofrece como el
+ * bloque adicional `return_inquiry` (T4, § hallazgo 4.1 "el equipo quiere el mail 8").
+ */
+const RETURN_INQUIRY_OUTCOME: RuleOutcome = "MAIL_8";
+
+/**
+ * Instrucción que acompaña `return_inquiry`, en inglés como el resto de `must_not_claim`: es guía
+ * interna para el modelo, no texto de cara al cliente.
+ */
+const RETURN_INQUIRY_INSTRUCTION =
+  "Use this only if the customer explicitly asks about a return for this order. The status of a " +
+  "return that has not been completed is not visible to this service (only a completed return, via " +
+  "the order state, is detected), so never claim the parcel was received or that a refund is being " +
+  "processed unless the rest of this guidance already says so.";
+
+/** El bloque adicional que ofrece el texto del mail 8 (retorno en curso), cuando aplica. Ver `RETURN_INQUIRY_OUTCOME`. */
+export interface GuidanceReturnInquiry {
+  reference_template: "MAIL_8";
+  template_text: string | null;
+  instruction: string;
+}
+
+/**
  * El bloque que Lia recibe para redactar la respuesta al cliente. `situation`
  * es el desenlace (`RuleOutcome`); el resto son los hechos, límites y
  * prohibiciones que Lia tiene que respetar, nunca texto ya redactado salvo
@@ -324,6 +350,22 @@ export interface GuidanceBlock {
   reference_template: string | null;
   template_text: string | null;
   missing_facts: string[];
+  /**
+   * T4: si este pedido tiene que marcarse para que el equipo lo revise — `template.notifyTeam`
+   * (ej. MAIL_15, § hallazgo 7) O cualquier escalada (`must_escalate`: un caso escalado también
+   * necesita al equipo). SOLO es una bandera: este servicio nunca envía ninguna notificación por
+   * su cuenta (Zimbra u otra); esa acción se habilita en otro lugar (decisión del usuario).
+   */
+  notify_team: boolean;
+  /**
+   * Bloque adicional (T4, § hallazgo 4.1) con el texto del mail 8 para cuando el CLIENTE pregunte
+   * por una devolución de este pedido: `order_lookup` no tiene forma de saber que la pregunta era
+   * sobre un retorno, así que se ofrece siempre que aplique, nunca como el desenlace principal.
+   * Aditivo: ausente (nunca `null`) cuando el pedido está en el grupo R (retorno terminado, que ya
+   * tiene su propio desenlace) o F (reembolso), o cuando el conjunto de reglas activo no tiene
+   * ninguna plantilla MAIL_8 sembrada (conjunto viejo, previo a T4): nunca se inventa este texto.
+   */
+  return_inquiry?: GuidanceReturnInquiry;
 }
 
 /**
@@ -514,6 +556,32 @@ export function buildGuidance(
       "Un dato faltante nunca se inventa ni se omite en silencio, se escala (§7.4).";
   }
 
+  // T4: `template?.notifyTeam` es `undefined` cuando no hay plantilla (ESCALATE o missingTemplate);
+  // el `?? false` lo trata como "no pide seguimiento por sí sola", y el `|| mustEscalate` agrega
+  // todo caso escalado: un pedido que un humano tiene que revisar igual necesita que el equipo lo
+  // vea, tenga o no su plantilla la bandera puesta.
+  const notifyTeam = (template?.notifyTeam ?? false) || mustEscalate;
+
+  // Bloque adicional del mail 8 (T4, § hallazgo 4.1): se ofrece para cualquier pedido que NO esté
+  // en el grupo R (retorno terminado, que ya tiene su propio desenlace de la matriz) ni F
+  // (reembolso, ídem), y solo si el conjunto de reglas activo tiene una plantilla MAIL_8 sembrada.
+  // Nunca depende de `evaluation.outcome`/`template`: es aditivo a cualquier desenlace principal,
+  // incluido ESCALATE, igual que `returnDataAvailable`/`refund` más arriba. Sin plantilla MAIL_8
+  // (conjunto sembrado antes de T4) se omite el campo entero — nunca se inventa el texto ni se
+  // revienta la consulta por un conjunto viejo.
+  const canOfferReturnInquiry = facts.stateGroup !== "R" && facts.stateGroup !== "F";
+  const returnInquiryTemplate = canOfferReturnInquiry
+    ? (templates.find((t) => t.outcome === RETURN_INQUIRY_OUTCOME) ?? null)
+    : null;
+  const returnInquiry: GuidanceReturnInquiry | undefined =
+    returnInquiryTemplate === null
+      ? undefined
+      : {
+          reference_template: "MAIL_8",
+          template_text: returnInquiryTemplate.body.trim().length > 0 ? returnInquiryTemplate.body : null,
+          instruction: RETURN_INQUIRY_INSTRUCTION,
+        };
+
   return {
     situation: evaluation.outcome,
     can_answer: !mustEscalate,
@@ -525,5 +593,7 @@ export function buildGuidance(
     reference_template: template?.outcome ?? null,
     template_text: template !== null && template.body.trim().length > 0 ? template.body : null,
     missing_facts: missingFacts,
+    notify_team: notifyTeam,
+    ...(returnInquiry !== undefined ? { return_inquiry: returnInquiry } : {}),
   };
 }

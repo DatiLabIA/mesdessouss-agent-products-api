@@ -415,6 +415,19 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
           reference_template: guidance.reference_template,
           template_text: guidance.template_text,
           missing_facts: [...guidance.missing_facts],
+          notify_team: guidance.notify_team,
+          // Aditivo (T4): `guidance.return_inquiry` está ausente cuando no aplica (grupo R/F) o el
+          // conjunto de reglas activo no tiene plantilla MAIL_8 (conjunto viejo, previo a T4). Se
+          // hace explícito acá, nunca con un spread, igual que el resto de este objeto.
+          ...(guidance.return_inquiry !== undefined
+            ? {
+                return_inquiry: {
+                  reference_template: guidance.return_inquiry.reference_template,
+                  template_text: guidance.return_inquiry.template_text,
+                  instruction: guidance.return_inquiry.instruction,
+                },
+              }
+            : {}),
         },
       };
 

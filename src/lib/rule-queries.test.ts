@@ -272,6 +272,34 @@ describe("parseTemplates", () => {
     const rows = parseTemplates([templateRow({ outcome: "MAIL_10" }), templateRow({ outcome: "MAIL_REFUND" })]);
     assert.deepEqual(rows.map((r) => r.outcome), ["MAIL_10", "MAIL_REFUND"]);
   });
+
+  test("acepta el desenlace nuevo MAIL_8 (T4, plantilla del retorno en curso)", () => {
+    const [row] = parseTemplates([templateRow({ outcome: "MAIL_8" })]);
+    assert.equal(row.outcome, "MAIL_8");
+  });
+
+  // ─── notifyTeam (T4) ────────────────────────────────────────────────────
+
+  test("notifyTeam: se preserva true/false cuando la fila cruda lo trae", () => {
+    for (const valor of [true, false] as const) {
+      const [row] = parseTemplates([templateRow({ notifyTeam: valor })]);
+      assert.equal(row.notifyTeam, valor);
+    }
+  });
+
+  test("notifyTeam ausente en la fila cruda (conjunto sembrado antes de T4) → false, nunca un dato faltante", () => {
+    // `templateRow()` no trae `notifyTeam`: representa exactamente una fila cruda de antes de T4
+    // (compatibilidad hacia atrás con el conjunto activo actual, sembrado con el seed viejo).
+    const [row] = parseTemplates([templateRow()]);
+    assert.equal(row.notifyTeam, false);
+  });
+
+  test("notifyTeam no booleano lanza RuleSetValidationError", () => {
+    assert.throws(
+      () => parseTemplates([templateRow({ notifyTeam: "true" as never })]),
+      RuleSetValidationError
+    );
+  });
 });
 
 // ─── parseRuleSettings ────────────────────────────────────────────────────

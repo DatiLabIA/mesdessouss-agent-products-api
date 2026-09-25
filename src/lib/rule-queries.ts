@@ -300,6 +300,10 @@ export async function createRuleDraft(clientId: string, note: string): Promise<R
           body: t.body,
           factsToConvey: t.factsToConvey as Prisma.InputJsonValue,
           mustNotClaim: t.mustNotClaim as Prisma.InputJsonValue,
+          // T2 ya encontró que clonar puede dejar caer en silencio un campo nuevo (ver el historial
+          // de esta función): `notifyTeam` (T4) se lista acá explícitamente a propósito, para que
+          // clonar un borrador desde el activo no pierda la bandera de un mail que sí la tenía.
+          notifyTeam: t.notifyTeam,
         }))
       : ruleTemplateSeed;
   const settingsData =
@@ -446,6 +450,7 @@ export async function setTemplate(clientId: string, version: number, input: Rule
     body: row.body,
     factsToConvey: row.factsToConvey as Prisma.InputJsonValue,
     mustNotClaim: row.mustNotClaim as Prisma.InputJsonValue,
+    notifyTeam: row.notifyTeam,
   };
 
   await prisma.ruleTemplate.upsert({

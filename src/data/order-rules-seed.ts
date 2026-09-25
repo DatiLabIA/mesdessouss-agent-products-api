@@ -198,6 +198,15 @@ export type DelayBucket = DelayBucketCondition;
  * docs/hallazgos-conversaciones-flow-test.md) que no tiene número de mail en
  * el documento original porque ese documento no cubría los estados de
  * reembolso — no se inventa un número de mail que el equipo no asignó.
+ *
+ * `MAIL_8` (T4, § hallazgo 4.1 "el equipo quiere el mail 8" de
+ * docs/hallazgos-conversaciones-flow-test.md) es distinto de todos los demás: NINGUNA fila de la
+ * matriz lo selecciona nunca, a propósito. `order_lookup` no sabe si la pregunta del cliente es
+ * sobre una devolución (eso exigiría un parámetro nuevo en la tool, fuera de esta tarea), así que
+ * su plantilla se entrega siempre como el bloque adicional `guidance.return_inquiry`, para que Lia
+ * lo tenga disponible SI el cliente pregunta por una devolución — nunca como el `situation`/
+ * `reference_template` principal del pedido. Ver `order-rules-seed.test.ts` para la prueba de que
+ * es la única plantilla sembrada sin fila propia.
  */
 export type RuleOutcome =
   | "MAIL_1"
@@ -207,6 +216,7 @@ export type RuleOutcome =
   | "MAIL_5"
   | "MAIL_6"
   | "MAIL_7"
+  | "MAIL_8"
   | "MAIL_10"
   | "MAIL_12"
   | "MAIL_15"
@@ -543,20 +553,43 @@ export interface RuleTemplateSeed {
   factsToConvey: string[];
   /** Afirmaciones que Lia tiene prohibido hacer en este desenlace. */
   mustNotClaim: string[];
+  /**
+   * T4: si este desenlace tiene que marcarse para que el equipo lo revise (ej. MAIL_15, que
+   * promete "nous reviendrons vers vous dans un délai de 48 heures" — § hallazgo 7 "je viens de
+   * transmettre votre demande" de docs/hallazgos-conversaciones-flow-test.md). `buildGuidance`
+   * expone esto en `guidance.notify_team`, junto con cualquier escalada: es SOLO una bandera, este
+   * servicio nunca envía ninguna notificación — la acción real (Zimbra u otra) se habilita en otro
+   * lugar (decisión del usuario, fuera de esta tarea).
+   */
+  notifyTeam: boolean;
 }
 
 export const ruleTemplateSeed: RuleTemplateSeed[] = [
   {
     outcome: "MAIL_1",
     lang: "fr",
-    // Pendiente de importar desde scenario_lia.numbers (Feuil2, mail 1).
-    body: "",
+    // Texto A.2 del Anexo A (docs/hallazgos-conversaciones-flow-test.md), transcrito literal: nota
+    // de la conversación 721c0860 (pedido ZKHRPZKYY), un pedido en preparación con todo en stock
+    // (§ hallazgo 1 "retrasos: MAIL_15 no tiene nada que decir", Mejora A punto 2).
+    //
+    // ATENCIÓN: el texto original TIENE erratas ("pour votre commande est en cours de traitement"
+    // en vez de algo como "et votre commande est…"; "Celle va être expédiée" en vez de "Elle va
+    // être expédiée") y el propio Anexo A las señala. Se siembran igual, sin corregirlas: es texto
+    // comercial ya aprobado por el cliente, y esta siembra no se toma la licencia de reescribir el
+    // francés de nadie en silencio. Corregirlas es tarea del equipo, no de este commit.
+    body:
+      "Bonjour, Nous vous remercions pour votre commande est en cours de traitement. Celle va être " +
+      "expédiée sous 48 heures (hors week-end et jours fériés). À l'expédition de votre commande, un " +
+      "mail de notre partenaire (Socolissimo La Poste ou Chronopost) vous sera transmis pour suivre " +
+      "l'acheminement de votre colis. Nous vous remercions pour votre confiance et vous souhaitons " +
+      "une bonne reception de votre commande.",
     factsToConvey: ["order_reference"],
     mustNotClaim: [
       "must not state or imply the order has already shipped",
       "must not provide a tracking number or tracking link",
       "must not mention any delay, since there is none",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_2",
@@ -569,6 +602,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not provide a tracking number or tracking link",
       "must not claim the delay is longer than a few days or indefinite",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_3",
@@ -581,6 +615,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not invent a delivery date that the tracking data does not confirm",
       "must not claim the parcel was delivered unless tracking confirms it",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_4",
@@ -609,6 +644,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not omit any of the out-of-stock products from the list",
       "must not commit to a ship date earlier than limit_date",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_5",
@@ -622,6 +658,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not provide a tracking number or tracking link",
       "must not commit to a ship date earlier than limit_date",
     ],
+    notifyTeam: false,
   },
   // No se siembra ninguna plantilla MAIL_6 (T3): su fila de la matriz se quitó (ver el comentario de
   // la fila de prioridad 12 más arriba) porque el texto A.4 del equipo (productos pendientes + fecha
@@ -653,6 +690,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not promise a date for the remaining products",
       "must not claim the whole order has been delivered",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_10",
@@ -673,6 +711,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not state a refund amount, since the credit note has not been issued yet",
       "must not claim the refund or the voucher has already been issued",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_12",
@@ -684,6 +723,7 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not state a refund amount that the credit note does not confirm",
       "must not claim the funds have already reached the customer's bank, only that the return was processed",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_REFUND",
@@ -697,17 +737,73 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not state a refund amount that the credit note does not confirm",
       "must not claim the funds have already reached the customer's bank",
     ],
+    notifyTeam: false,
   },
   {
     outcome: "MAIL_15",
     lang: "fr",
-    // Pendiente de importar desde scenario_lia.numbers (Feuil2, mail 15).
-    body: "",
+    // Texto A.1 del Anexo A (docs/hallazgos-conversaciones-flow-test.md), transcrito literal: cuatro
+    // notas IDÉNTICAS del equipo (conversaciones 18b3611c/9944442e/10e1f22e/8e8cb91d, § hallazgo 1
+    // "retrasos: MAIL_15 no tiene nada que decir", Mejora A punto 1) — el caso más repetido de las
+    // dos muestras (12 de 28 conversaciones `bad`).
+    body: [
+      "Bonjour,",
+      "",
+      "Nous sommes malheureusement au regret de vous informer que le délai de préparation initialement " +
+        "annoncé pour votre commande est désormais dépassé. Nous vous présentons nos sincères excuses " +
+        "pour ce retard et pour la gêne occasionnée.",
+      "Afin de vous communiquer une information précise, nous avons relancé notre service logistique " +
+        "afin d'obtenir une nouvelle estimation du délai de préparation et d'expédition de votre commande.",
+      "Nous reviendrons vers vous dans un délai de 48 heures ouvrées, hors week-ends et jours fériés, " +
+        "afin de vous communiquer le nouveau délai et de vous tenir informé(e) de l'avancement de votre " +
+        "commande.",
+      "Nous vous remercions sincèrement pour votre patience, votre compréhension et votre confiance.",
+    ].join("\n"),
     factsToConvey: [],
     mustNotClaim: [
       "must not promise a specific new ship date",
       "must not state or imply the order has already shipped",
       "must not provide a tracking number or tracking link",
     ],
+    // El texto promete "nous reviendrons vers vous dans un délai de 48 heures ouvrées": esa promesa
+    // solo es verdad si alguien del equipo recibe el caso (§ hallazgo 7 "je viens de transmettre
+    // votre demande", Mejora G). El código nunca transmite nada por su cuenta: esto solo pone la
+    // bandera `guidance.notify_team` para que quien reciba el payload sepa que hace falta un
+    // seguimiento humano.
+    notifyTeam: true,
+  },
+  {
+    outcome: "MAIL_8",
+    lang: "fr",
+    // Texto A.5 del Anexo A (docs/hallazgos-conversaciones-flow-test.md), transcrito literal: mismo
+    // texto en las notas de las conversaciones 7c5a7464 y 7df749b3 (§ hallazgo 4.1 "el equipo quiere
+    // el mail 8"). A diferencia de toda otra plantilla, ninguna fila de la matriz selecciona esta:
+    // `order_lookup` no sabe si la pregunta del cliente es sobre una devolución, así que
+    // `buildGuidance` la entrega siempre como el bloque adicional `guidance.return_inquiry` (T4),
+    // nunca como `situation`/`reference_template` del pedido.
+    body: [
+      "Bonjour,",
+      "Après vérification, nous constatons que votre colis retour n'a pas encore été traité par notre " +
+        "service retours.",
+      "Si le suivi de votre colis indique qu'il a bien été livré, soyez rassuré(e) : le délai de " +
+        "traitement des retours est de 4 jours ouvrés, hors week-ends et jours fériés, à compter de sa " +
+        "réception par notre service.",
+      "",
+      "Dès que votre retour aura été traité, vous recevrez automatiquement une confirmation par e-mail.",
+      "",
+      "Si plus de 4 jours ouvrés se sont écoulés depuis la réception de votre colis, nous vous invitons " +
+        "à contacter notre service après-vente afin que nous puissions vous accompagner au mieux :",
+      "serviceclients@mesdessous.fr",
+      "Nous vous remercions pour votre patience et votre compréhension.",
+    ].join("\n"),
+    // Sin claves: el texto no necesita ningún dato del pedido, es un mensaje genérico sobre el
+    // plazo de tratamiento de un retorno.
+    factsToConvey: [],
+    mustNotClaim: [
+      "must not use this template unless the customer explicitly asked about a return for this order",
+      "must not claim to know whether the return parcel has actually been received: only the customer's own tracking can confirm that",
+      "must not state that a return is already being processed, since this service cannot see that",
+    ],
+    notifyTeam: false,
   },
 ];
