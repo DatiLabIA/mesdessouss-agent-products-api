@@ -59,5 +59,8 @@ const EMAIL = process.argv[3] ?? "marie54140@hotmail.fr";
   console.log("guidance   :", JSON.stringify({
     situation: g.situation, must_escalate: g.must_escalate, lang: g.reply_language,
     facts: g.facts_to_convey, missing: g.missing_facts,
+    notify_team: g.notify_team,
+    template_text: g.template_text ? `${g.template_text.slice(0, 80)}…` : null,
+    return_inquiry: g.return_inquiry ? g.return_inquiry.reference_template : null,
   }, null, 2));
 })().catch((e) => { console.error("FALLO:", e); process.exit(1); });
