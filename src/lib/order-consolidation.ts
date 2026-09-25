@@ -2,7 +2,7 @@ import { getMany, getOne, PrestashopNotFoundError } from "./prestashop-client";
 import { toNumericId } from "./order-identity";
 import type { VerifiedCustomerData, VerifiedOrderData } from "../types";
 import type { OrderFactsInput, OrderFactsLineInput, StateGroup } from "./order-facts";
-import type { GuidanceExtraContext, GuidanceOrderContext } from "./rule-evaluator";
+import type { GuidanceExtraContext, GuidanceOrderContext, GuidanceRefundContext } from "./rule-evaluator";
 
 /**
  * Consolidación de un pedido: una sola llamada de más alto nivel que reúne
@@ -685,6 +685,24 @@ function computeShippedAt(histories: OrderHistoryRecord[], stateGroups: Map<numb
 }
 
 /**
+ * Fecha en que el pedido entró más recientemente al grupo R (retorno terminado, §3.2; hoy solo el
+ * estado 61). A diferencia de `computeShippedAt` (la PRIMERA entrada al grupo B), acá se quiere la
+ * ÚLTIMA: si el pedido entró en 61 más de una vez, el texto A.6 del equipo habla de la recepción
+ * más reciente del paquete, no de la primera (§ hallazgo "Estado 61 timing" del task doc). `null`
+ * si el pedido nunca entró al grupo R.
+ */
+function computeReturnEnteredAt(histories: OrderHistoryRecord[], stateGroups: Map<number, StateGroup>): Date | null {
+  let latest: Date | null = null;
+  for (const history of histories) {
+    if (stateGroups.get(toNumericId(history.id_order_state)) !== "R") continue;
+    const date = parsePrestashopDate(history.date_add);
+    if (date === null) continue;
+    if (latest === null || date.getTime() > latest.getTime()) latest = date;
+  }
+  return latest;
+}
+
+/**
  * Timeline de cambios de estado del pedido (`order_histories`), ordenado cronológicamente
  * ascendente. No se consulta `order_states` por cada entrada para resolver un nombre -sería una
  * llamada HTTP por estado-: con el id y el grupo alcanza para que Lia razone sobre "cuánto lleva en
@@ -1205,6 +1223,11 @@ export async function consolidateOrder(
   const primaryThread = pickPrimaryThread(threads, messagesByThread);
   const conversation = computeConversation(primaryThread, messagesByThread, allMessages, input.today);
   const historyHasInfo = computeHistoryHasInfo(allMessages);
+  // `refund !== null`: el hecho que decide entre las dos filas del grupo R (MAIL_12/MAIL_10, §3.2)
+  // y entre las dos prohibiciones dinámicas de reembolso en `buildGuidance`. Siempre se conoce
+  // (el avoir existe o no existe), a diferencia de `historyHasInfo`.
+  const refundIssued = refund !== null;
+  const returnEnteredAt = computeReturnEnteredAt(histories, stateGroups);
 
   const facts: OrderFactsInput = {
     orderDate,
@@ -1213,6 +1236,8 @@ export async function consolidateOrder(
     lines: factsLines,
     historyHasInfo,
     today: input.today,
+    refundIssued,
+    returnEnteredAt,
   };
 
   const orderContext: GuidanceOrderContext = {
@@ -1227,10 +1252,19 @@ export async function consolidateOrder(
   // la prohibición que agrega `buildGuidance` en `must_not_claim` deja de aplicarse sola.
   const returnDataAvailable: false = false;
 
+  // Forma mínima que `resolveFactValue`/`buildGuidance` necesitan (`GuidanceRefundContext`), no el
+  // `ConsolidatedRefund` completo: ese tipo vive en este módulo, y `rule-evaluator.ts` no puede
+  // importarlo sin crear un ciclo (ver el JSDoc de `GuidanceRefundContext`).
+  const guidanceRefund: GuidanceRefundContext | null =
+    refund !== null
+      ? { type: refund.type, voucherExpiresAt: refund.voucherExpiresAt, lineNames: refund.lines.map((l) => l.name) }
+      : null;
+
   const extraContext: GuidanceExtraContext = {
     pendingProducts: null,
     additionalDelay: null,
     processedDate: refund?.processedDate ?? null,
+    refund: guidanceRefund,
     returnDataAvailable,
   };
 

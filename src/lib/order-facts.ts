@@ -22,8 +22,15 @@ import { normalizeBrandKey } from "./brand-normalize";
  * y no como una fila más de la matriz del §4. Sin una rama propia, el estado 61
  * "Retour Terminé" caía en D y escalaba: el mail 12 tenía plantilla sembrada y
  * ninguna forma de llegar a ella.
+ *
+ * `F` (reembolso) es nueva (§ hallazgo "Mejora E" de
+ * docs/hallazgos-conversaciones-flow-test.md): los estados 83/68/7/39/63
+ * caían todos en D y escalaban aunque el reembolso ya estuviera disponible.
+ * No es D ni R: no está en el §2.1 del documento (es "todo lo demás" para el
+ * documento original) y tampoco es el bloque RETORNO del §3.2 (esos estados
+ * son de PEDIDO ya reembolsado, no de retorno físico en curso).
  */
-export type StateGroup = "A" | "B" | "C" | "D" | "R";
+export type StateGroup = "A" | "B" | "C" | "D" | "R" | "F";
 
 /** Estado de stock del pedido completo (§2.2). */
 export type StockStatus = "EN_STOCK" | "SIN_STOCK";
@@ -88,6 +95,21 @@ export interface OrderFactsInput {
   historyHasInfo: boolean | null;
   /** Fecha de "hoy", inyectada por el llamador. Nunca se usa `new Date()` dentro de esta función. */
   today: Date;
+  /**
+   * `true` si el pedido tiene al menos un avoir (`refund !== null` en la consolidación).
+   * Opcional, por defecto `false`: solo importa para el grupo `R` (bloque RETORNO, §3.2) —
+   * en el resto de grupos ninguna fila de la matriz lo condiciona, así que los tests y
+   * llamadores que no hablan de retornos no necesitan pensarlo. A diferencia de
+   * `historyHasInfo`, este hecho SIEMPRE se conoce (el avoir existe o no existe: no hay un
+   * "no lo sé" intermedio), por eso es `boolean` y no `boolean | null`.
+   */
+  refundIssued?: boolean;
+  /**
+   * Fecha en que el pedido entró más recientemente al grupo `R` (hoy, solo el estado 61
+   * "Retour Terminé"). Opcional, por defecto `null`: solo importa para el grupo `R`, igual
+   * que `refundIssued`. `null` cuando nunca entró (o el llamador no lo sabe).
+   */
+  returnEnteredAt?: Date | null;
 }
 
 // ─── Configuración (inyectada, viene de la base en producción) ─────────────
@@ -103,6 +125,13 @@ export interface OrderFactsConfig {
   inStockLeadDays: number;
   /** Tope superior (inclusive) del tramo `SHORT`, la ventana de 1 a 3 días del mail 2. */
   shortDelayMaxDays: number;
+  /**
+   * Días hábiles máximos que un pedido puede quedarse en el grupo `R` (retorno terminado, §3.2)
+   * sin ningún reembolso registrado antes de que `checkFailSafe` lo escale en vez de dejarlo
+   * esperando indefinidamente (RuleSetting `return_refund_max_business_days`, §ver hallazgo
+   * "el equipo quería el texto A.6" en docs/hallazgos-conversaciones-flow-test.md).
+   */
+  returnRefundMaxBusinessDays: number;
 }
 
 // ─── Salida ─────────────────────────────────────────────────────────────
@@ -145,6 +174,23 @@ export interface OrderFacts {
   historyHasInfo: boolean | null;
   /** Detalle por línea, con la cobertura de stock ya resuelta. */
   lines: OrderFactsLine[];
+  /** `input.refundIssued`, o `false` si el llamador no lo informó. Ver su JSDoc en `OrderFactsInput`. */
+  refundIssued: boolean;
+  /** `input.returnEnteredAt` tal cual, sin tocar. `null` si el llamador no lo informó o nunca entró. */
+  returnEnteredAt: Date | null;
+  /**
+   * Días hábiles transcurridos desde `returnEnteredAt` hasta `today`. `null` fuera del grupo `R`
+   * o sin `returnEnteredAt`: no tiene sentido "cuánto lleva en retorno" para un pedido que no
+   * está en ese grupo.
+   */
+  returnAgeBusinessDays: number | null;
+  /**
+   * `true` cuando el pedido lleva más de `config.returnRefundMaxBusinessDays` días hábiles en el
+   * grupo `R` sin ningún reembolso registrado: `checkFailSafe` lo usa para escalar en vez de
+   * seguir esperando un abono que podría no llegar nunca. `false` en cualquier otro caso,
+   * incluido fuera del grupo `R`.
+   */
+  returnRefundStale: boolean;
 }
 
 // ─── Cálculo ────────────────────────────────────────────────────────────
@@ -219,6 +265,24 @@ export function computeOrderFacts(input: OrderFactsInput, config: OrderFactsConf
   // seguimiento en blanco es la misma salvaguarda que "no hay tracking" (§3.1).
   const hasTracking = input.trackingNumber !== null && input.trackingNumber.trim().length > 0;
 
+  // ─── Bloque RETORNO (§3.2): reembolso emitido y antigüedad en el grupo R ──
+  //
+  // Los dos son opcionales en la entrada (ver sus JSDoc en `OrderFactsInput`) porque solo
+  // importan para el grupo R: un pedido que no está en retorno no necesita pensarlos.
+  const refundIssued = input.refundIssued ?? false;
+  const returnEnteredAt = input.returnEnteredAt ?? null;
+
+  const returnAgeBusinessDays =
+    stateGroup === "R" && returnEnteredAt !== null
+      ? countBusinessDaysBetween(returnEnteredAt, input.today, config.holidays)
+      : null;
+
+  const returnRefundStale =
+    stateGroup === "R" &&
+    !refundIssued &&
+    returnAgeBusinessDays !== null &&
+    returnAgeBusinessDays > config.returnRefundMaxBusinessDays;
+
   return {
     stateGroup,
     stockStatus,
@@ -232,5 +296,9 @@ export function computeOrderFacts(input: OrderFactsInput, config: OrderFactsConf
     hasTracking,
     historyHasInfo: input.historyHasInfo,
     lines,
+    refundIssued,
+    returnEnteredAt,
+    returnAgeBusinessDays,
+    returnRefundStale,
   };
 }

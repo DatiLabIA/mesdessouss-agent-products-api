@@ -164,6 +164,7 @@ function fakeRuleSet(): LoadedRuleSet {
         delayBucket: null,
         hasTracking: null,
         historyHasInfo: null,
+        refundIssued: null,
         outcome: "MAIL_1",
         note: "Confirmación estándar de pedido en stock.",
       },
@@ -175,6 +176,7 @@ function fakeRuleSet(): LoadedRuleSet {
         delayBucket: null,
         hasTracking: null,
         historyHasInfo: null,
+        refundIssued: null,
         outcome: "ESCALATE",
         note: "Cajón de sastre: ninguna otra fila matcheó.",
       },
@@ -188,7 +190,7 @@ function fakeRuleSet(): LoadedRuleSet {
         mustNotClaim: ["no afirmar que el pedido ya fue expedido"],
       },
     ],
-    settings: { inStockLeadDays: 2, shortDelayMaxDays: 3 },
+    settings: { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 },
   };
 }
 

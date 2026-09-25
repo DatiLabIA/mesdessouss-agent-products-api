@@ -621,6 +621,12 @@ export function createMcpServer(): McpServer {
         .boolean()
         .nullable()
         .describe("Si requiere que el historial de mensajes tenga información útil (true) o esté vacío (false), o null = cualquiera."),
+      refundIssued: z
+        .boolean()
+        .nullable()
+        .describe(
+          "Si requiere que ya haya un reembolso registrado (true) o que no lo haya (false), o null = cualquiera. Solo lo usan las filas del grupo R (bloque RETORNO)."
+        ),
       outcome: z.enum(RULE_OUTCOMES).describe("Desenlace de esta fila: qué mail corresponde, o ESCALATE."),
       note: z
         .string()
@@ -742,6 +748,7 @@ export function createMcpServer(): McpServer {
           holidays: ruleSet.holidays,
           inStockLeadDays: ruleSet.settings.inStockLeadDays,
           shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+          returnRefundMaxBusinessDays: ruleSet.settings.returnRefundMaxBusinessDays,
         });
 
         const evaluation = evaluateRules(facts, ruleSet.decisions);
@@ -819,6 +826,7 @@ export function createMcpServer(): McpServer {
           holidays: ruleSet.holidays,
           inStockLeadDays: ruleSet.settings.inStockLeadDays,
           shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+          returnRefundMaxBusinessDays: ruleSet.settings.returnRefundMaxBusinessDays,
         });
 
         const evaluation = evaluateRules(facts, ruleSet.decisions);

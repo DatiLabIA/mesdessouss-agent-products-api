@@ -76,7 +76,7 @@ export class RuleSetActivationConflictError extends Error {
 // `mcp-instance.ts`. Duplicar esta lista allá sería exactamente el error de
 // `normalizeBrandKey` de T6/T7: dos copias que hoy coinciden y mañana no.
 
-export const STATE_GROUP_CODES = ["A", "B", "C", "D", "R"] as const;
+export const STATE_GROUP_CODES = ["A", "B", "C", "D", "R", "F"] as const;
 export const STOCK_STATUSES = ["EN_STOCK", "SIN_STOCK"] as const;
 export const BRAND_COUNTS = ["ONE", "MANY"] as const;
 export const DELAY_BUCKET_CONDITIONS = ["NONE", "SHORT", "LONG", "POSITIVE"] as const;
@@ -88,8 +88,10 @@ export const RULE_OUTCOMES = [
   "MAIL_5",
   "MAIL_6",
   "MAIL_7",
+  "MAIL_10",
   "MAIL_12",
   "MAIL_15",
+  "MAIL_REFUND",
   "ESCALATE",
 ] as const;
 /**
@@ -147,6 +149,7 @@ export interface RawDecisionRow {
   delayBucket: string | null;
   hasTracking: boolean | null;
   historyHasInfo: boolean | null;
+  refundIssued: boolean | null;
   outcome: string;
   note: string | null;
 }
@@ -192,6 +195,7 @@ const decisionRowSchema = z.object({
   delayBucket: delayBucketConditionSchema.nullable(),
   hasTracking: z.boolean().nullable(),
   historyHasInfo: z.boolean().nullable(),
+  refundIssued: z.boolean().nullable(),
   outcome: ruleOutcomeSchema,
   note: z.string().trim().min(1, "toda fila de la matriz necesita una nota legible (se usa para explicar la decisión)"),
 });
@@ -271,15 +275,17 @@ export function parseTemplates(rows: readonly RawTemplateRow[]): RuleTemplateSee
   );
 }
 
-/** Ajustes obligatorios que `OrderFactsConfig` necesita para calcular plazos (§2.4, §2.5). */
+/** Ajustes obligatorios que `OrderFactsConfig` necesita para calcular plazos (§2.4, §2.5) y para el fail-safe del grupo R. */
 export interface RuleSettingsConfig {
   inStockLeadDays: number;
   shortDelayMaxDays: number;
+  returnRefundMaxBusinessDays: number;
 }
 
 const REQUIRED_NUMERIC_SETTINGS = [
   { key: "in_stock_lead_days", field: "inStockLeadDays" },
   { key: "short_delay_max_days", field: "shortDelayMaxDays" },
+  { key: "return_refund_max_business_days", field: "returnRefundMaxBusinessDays" },
 ] as const;
 
 /**

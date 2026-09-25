@@ -621,6 +621,94 @@ describe("consolidateOrder — reembolso", () => {
   });
 });
 
+// ─── Bloque RETORNO (§3.2): refundIssued y fecha de entrada al grupo R ────
+//
+// `STATE_GROUPS` (arriba) no mapea 61 a "R" a propósito, para que los tests de "retorno" que ya
+// existían (más abajo) prueben el comportamiento SIN esa fila sembrada. Estos tests sí la
+// necesitan: usan su propio mapa, igual que hacen los tests de "timeline de estados".
+
+const STATE_GROUPS_WITH_R: Map<number, StateGroup> = new Map([...STATE_GROUPS, [STATE_RETURN, "R"]]);
+
+describe("consolidateOrder — facts.refundIssued y facts.returnEnteredAt", () => {
+  test("facts.refundIssued es true cuando hay avoir, false cuando no hay ninguno", async () => {
+    stub({
+      orderSlip: {
+        body: JSON.stringify({
+          order_slips: [
+            { id: 77, id_order: ORDER_ID, total_products_tax_incl: "20.00", total_shipping_tax_incl: "0.00", date_add: "2026-09-10 12:00:00" },
+          ],
+        }),
+      },
+    });
+    const conAvoir = await consolidateOrder(buildInput(), STATE_GROUPS);
+    assert.equal(conAvoir.facts.refundIssued, true);
+
+    stub({ orderSlip: { body: emptyCollection("order_slips") } });
+    const sinAvoir = await consolidateOrder(buildInput(), STATE_GROUPS);
+    assert.equal(sinAvoir.facts.refundIssued, false);
+  });
+
+  test("facts.returnEnteredAt es la fecha en que el pedido entró más recientemente al grupo R", async () => {
+    stub({
+      orderHistories: {
+        body: JSON.stringify({
+          order_histories: [
+            // Entró al grupo R dos veces (verificado que ocurre en producción, § hallazgo "State
+            // 61 timing" del task doc): se queda con la más reciente, no la primera.
+            { id: 1, id_order_state: String(STATE_RETURN), date_add: "2026-09-01 10:00:00" },
+            { id: 2, id_order_state: STATE_A, date_add: "2026-09-05 09:00:00" },
+            { id: 3, id_order_state: String(STATE_RETURN), date_add: "2026-09-20 08:30:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS_WITH_R);
+
+    assert.equal(result.facts.returnEnteredAt?.toISOString(), new Date("2026-09-20T08:30:00Z").toISOString());
+  });
+
+  test("facts.returnEnteredAt es null cuando el pedido nunca entró al grupo R", async () => {
+    stub();
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS_WITH_R);
+    assert.equal(result.facts.returnEnteredAt, null);
+  });
+
+  test("extraContext.refund viaja con type/voucherExpiresAt/lineNames cuando hay avoir", async () => {
+    const ruleId = 55;
+    stub({
+      orderSlip: {
+        body: JSON.stringify({
+          order_slips: [
+            { id: 77, id_order: ORDER_ID, total_products_tax_incl: "20.00", total_shipping_tax_incl: "0.00", date_add: "2026-09-10 12:00:00" },
+          ],
+        }),
+      },
+      cartRules: {
+        body: JSON.stringify({
+          cart_rules: [
+            { id: ruleId, code: `V${ruleId}C${CUSTOMER_ID}O${ORDER_ID}`, date_to: "2026-12-31 00:00:00", active: "1" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.deepEqual(result.extraContext.refund, {
+      type: "VOUCHER",
+      voucherExpiresAt: new Date("2026-12-31T00:00:00Z"),
+      lineNames: [],
+    });
+  });
+
+  test("extraContext.refund es null sin ningún avoir", async () => {
+    stub({ orderSlip: { body: emptyCollection("order_slips") } });
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+    assert.equal(result.extraContext.refund, null);
+  });
+});
+
 // ─── Retorno ──────────────────────────────────────────────────────────────
 
 /**

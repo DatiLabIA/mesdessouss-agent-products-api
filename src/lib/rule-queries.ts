@@ -287,6 +287,7 @@ export async function createRuleDraft(clientId: string, note: string): Promise<R
           delayBucket: d.delayBucket,
           hasTracking: d.hasTracking,
           historyHasInfo: d.historyHasInfo,
+          refundIssued: d.refundIssued,
           outcome: d.outcome,
           note: d.note,
         }))
@@ -422,6 +423,7 @@ export async function setDecisionRule(clientId: string, version: number, input: 
     delayBucket: row.delayBucket,
     hasTracking: row.hasTracking,
     historyHasInfo: row.historyHasInfo,
+    refundIssued: row.refundIssued,
     outcome: row.outcome,
     note: row.note,
   };

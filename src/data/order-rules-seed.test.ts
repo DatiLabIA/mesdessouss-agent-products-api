@@ -92,6 +92,7 @@ describe("integridad de la matriz", () => {
       ultima.delayBucket,
       ultima.hasTracking,
       ultima.historyHasInfo,
+      ultima.refundIssued,
     ]) {
       assert.equal(cond ?? null, null, "el cajón de sastre no puede llevar condiciones");
     }
@@ -113,5 +114,22 @@ describe("integridad de la matriz", () => {
     assert.deepEqual(porGrupo.get("A"), [2, 3, 9, 17, 18]);
     assert.deepEqual(porGrupo.get("B"), [4, 10, 31]);
     assert.deepEqual(porGrupo.get("C"), [14]);
+    assert.deepEqual(porGrupo.get("R"), [61]);
+    // Grupo F (reembolso): 83/68/7 con volumen real verificado (§ hallazgo "Mejora E"),
+    // 39/63 sembrados igual aunque sin volumen visto todavía.
+    assert.deepEqual(porGrupo.get("F"), [7, 39, 63, 68, 83]);
+  });
+
+  test("las filas del grupo R son las dos únicas que usan refundIssued, con true y false", () => {
+    const filasR = ruleDecisionSeed.filter((r) => r.stateGroup === "R");
+    assert.equal(filasR.length, 2);
+    assert.deepEqual(
+      filasR.map((r) => r.refundIssued).sort(),
+      [false, true]
+    );
+    for (const regla of ruleDecisionSeed) {
+      if (regla.stateGroup === "R") continue;
+      assert.equal(regla.refundIssued, null, `la fila ${regla.priority} (${regla.outcome}) no es del grupo R y no debería exigir refundIssued`);
+    }
   });
 });

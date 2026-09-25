@@ -51,6 +51,10 @@ function baseFacts(overrides: Partial<OrderFacts> = {}): OrderFacts {
     hasTracking: false,
     historyHasInfo: null,
     lines: [factLine()],
+    refundIssued: false,
+    returnEnteredAt: null,
+    returnAgeBusinessDays: null,
+    returnRefundStale: false,
     ...overrides,
   };
 }
@@ -187,28 +191,71 @@ describe("checkFailSafe", () => {
   });
 });
 
+// ─── checkFailSafe — grupo R (antigüedad sin reembolso) y grupo F (T2) ──
+
+describe("checkFailSafe — grupo R y grupo F", () => {
+  test("grupo R sin reembolso, dentro del plazo (returnRefundStale false): no escala, sigue a la matriz", () => {
+    const facts = baseFacts({ stateGroup: "R", refundIssued: false, returnRefundStale: false });
+    assert.equal(checkFailSafe(facts), null);
+  });
+
+  test("grupo R sin reembolso y stale: escala con un motivo legible", () => {
+    const facts = baseFacts({
+      stateGroup: "R",
+      refundIssued: false,
+      returnAgeBusinessDays: 9,
+      returnRefundStale: true,
+    });
+    const reason = checkFailSafe(facts);
+    assert.notEqual(reason, null);
+    assert.match(reason!, /9 día/);
+  });
+
+  test("grupo R con reembolso ya emitido: no escala aunque returnRefundStale llegara true por error del llamador", () => {
+    // computeOrderFacts nunca produce esta combinación (returnRefundStale exige refundIssued
+    // false), pero checkFailSafe no debe depender de esa garantía externa para no escalar de más.
+    const facts = baseFacts({ stateGroup: "R", refundIssued: true, returnRefundStale: false });
+    assert.equal(checkFailSafe(facts), null);
+  });
+
+  test("grupo F no dispara el fail-safe de grupo D: nunca escala en código, la matriz decide", () => {
+    // Antes de T2, cualquier estado no sembrado (incluidos los de reembolso) caía en D y
+    // `checkFailSafe` escalaba siempre. F es un grupo propio: no debe pisar esa rama.
+    const facts = baseFacts({ stateGroup: "F" });
+    assert.equal(checkFailSafe(facts), null);
+  });
+
+  test("grupo F con stock/marca en un estado que dispararía el fail-safe de A no escala: esas comprobaciones son solo del grupo A", () => {
+    const facts = baseFacts({ stateGroup: "F", unknownBrands: ["Marca Fantasma"] });
+    assert.equal(checkFailSafe(facts), null);
+  });
+});
+
 // ─── evaluateRules — las 13 filas del §4, contra la siembra real ────────
 
 describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
+  // Las prioridades de la siembra ya no son 1-13: las dos filas del grupo R (MAIL_12/MAIL_10, T2)
+  // se insertaron al principio (0-1) y la fila del grupo F (MAIL_REFUND, T2) entre el §4 y el
+  // grupo D. "fila N" en cada título sigue nombrando la fila del documento (§4), no la prioridad.
   test("fila 1: Grupo A, EN_STOCK, sin retraso → MAIL_1", () => {
     const facts = baseFacts({ stateGroup: "A", stockStatus: "EN_STOCK", delayBucket: "NONE" });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_1");
-    assert.equal(result.matchedRule?.priority, 1);
+    assert.equal(result.matchedRule?.priority, 2);
   });
 
   test("fila 2: Grupo A, EN_STOCK, retraso corto → MAIL_2", () => {
     const facts = baseFacts({ stateGroup: "A", stockStatus: "EN_STOCK", delayBucket: "SHORT", delayDays: 2 });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_2");
-    assert.equal(result.matchedRule?.priority, 2);
+    assert.equal(result.matchedRule?.priority, 3);
   });
 
   test("fila 3: Grupo A, EN_STOCK, retraso largo → MAIL_15", () => {
     const facts = baseFacts({ stateGroup: "A", stockStatus: "EN_STOCK", delayBucket: "LONG", delayDays: 10 });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_15");
-    assert.equal(result.matchedRule?.priority, 3);
+    assert.equal(result.matchedRule?.priority, 4);
   });
 
   test("fila 4: Grupo A, SIN_STOCK monomarca, sin retraso → MAIL_5", () => {
@@ -224,7 +271,7 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_5");
-    assert.equal(result.matchedRule?.priority, 4);
+    assert.equal(result.matchedRule?.priority, 5);
   });
 
   test("fila 5: Grupo A, SIN_STOCK multimarca, sin retraso → MAIL_4", () => {
@@ -243,7 +290,7 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_4");
-    assert.equal(result.matchedRule?.priority, 5);
+    assert.equal(result.matchedRule?.priority, 6);
   });
 
   test("fila 6: Grupo A, SIN_STOCK monomarca, con retraso (LONG) → MAIL_15, no ESCALATE", () => {
@@ -264,7 +311,7 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_15");
     assert.notEqual(result.outcome, "ESCALATE");
-    assert.equal(result.matchedRule?.priority, 6);
+    assert.equal(result.matchedRule?.priority, 7);
   });
 
   test("fila 7: Grupo A, SIN_STOCK multimarca, con retraso (SHORT) → MAIL_15, no ESCALATE", () => {
@@ -285,35 +332,35 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_15");
     assert.notEqual(result.outcome, "ESCALATE");
-    assert.equal(result.matchedRule?.priority, 7);
+    assert.equal(result.matchedRule?.priority, 8);
   });
 
   test("fila 8: Grupo B con tracking → MAIL_3", () => {
     const facts = baseFacts({ stateGroup: "B", hasTracking: true });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_3");
-    assert.equal(result.matchedRule?.priority, 8);
+    assert.equal(result.matchedRule?.priority, 9);
   });
 
   test("fila 9: Grupo B sin tracking → ESCALATE", () => {
     const facts = baseFacts({ stateGroup: "B", hasTracking: false });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "ESCALATE");
-    assert.equal(result.matchedRule?.priority, 9);
+    assert.equal(result.matchedRule?.priority, 10);
   });
 
   test("fila 10: Grupo C con historial con información → MAIL_6", () => {
     const facts = baseFacts({ stateGroup: "C", historyHasInfo: true });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_6");
-    assert.equal(result.matchedRule?.priority, 10);
+    assert.equal(result.matchedRule?.priority, 11);
   });
 
   test("fila 11: Grupo C sin información en el historial → MAIL_7", () => {
     const facts = baseFacts({ stateGroup: "C", historyHasInfo: false });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "MAIL_7");
-    assert.equal(result.matchedRule?.priority, 11);
+    assert.equal(result.matchedRule?.priority, 12);
   });
 
   test("fila 12: Grupo D → ESCALATE (intercepta el fail-safe, no la fila 12)", () => {
@@ -330,7 +377,7 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     const facts = baseFacts({ stateGroup: "C", historyHasInfo: null });
     const result = evaluateRules(facts, ruleDecisionSeed);
     assert.equal(result.outcome, "ESCALATE");
-    assert.equal(result.matchedRule?.priority, 13);
+    assert.equal(result.matchedRule?.priority, 15);
   });
 });
 
@@ -373,6 +420,7 @@ describe("evaluateRules — casos transversales", () => {
         delayBucket: null,
         hasTracking: true,
         historyHasInfo: null,
+        refundIssued: null,
         outcome: "MAIL_3",
         note: "única fila, no aplica a este pedido",
       },
@@ -385,29 +433,81 @@ describe("evaluateRules — casos transversales", () => {
   test("la traza identifica la fila ganadora (priority y note)", () => {
     const facts = baseFacts({ stateGroup: "A", stockStatus: "EN_STOCK", delayBucket: "NONE" });
     const result = evaluateRules(facts, ruleDecisionSeed);
-    const filaEsperada = ruleDecisionSeed.find((r) => r.priority === 1)!;
+    const filaEsperada = ruleDecisionSeed.find((r) => r.outcome === "MAIL_1")!;
     assert.deepEqual(result.matchedRule, { priority: filaEsperada.priority, note: filaEsperada.note });
   });
 
   test("prioridades ascendentes: gana la primera fila que matchea, no otra que también matchearía", () => {
-    // Filas 8 y 9 solo difieren en hasTracking, así que nunca compiten. Pero
-    // una fila 0 ficticia con la misma forma que la fila 1 y outcome distinto
-    // debe ganar por tener menor priority.
+    // La siembra real ya usa las prioridades 0 y 1 para el grupo R (T2), así que la fila ficticia
+    // de este test usa -1 para seguir garantizando que gana por tener la prioridad más baja de
+    // todas, sin colisionar con ninguna fila real.
     const facts = baseFacts({ stateGroup: "A", stockStatus: "EN_STOCK", delayBucket: "NONE" });
     const filaCero: RuleDecisionSeed = {
-      priority: 0,
+      priority: -1,
       stateGroup: "A",
       stockStatus: "EN_STOCK",
       brandCount: null,
       delayBucket: "NONE",
       hasTracking: null,
       historyHasInfo: null,
+      refundIssued: null,
       outcome: "MAIL_2",
       note: "fila de prueba con prioridad más alta",
     };
     const result = evaluateRules(facts, [filaCero, ...ruleDecisionSeed]);
     assert.equal(result.outcome, "MAIL_2");
+    assert.equal(result.matchedRule?.priority, -1);
+  });
+});
+
+// ─── evaluateRules — bloque RETORNO (grupo R) y grupo F (T2) ───────────
+
+describe("evaluateRules — grupo R: MAIL_12 con reembolso, MAIL_10 sin él", () => {
+  test("grupo R con reembolso ya emitido → MAIL_12", () => {
+    const facts = baseFacts({ stateGroup: "R", refundIssued: true });
+    const result = evaluateRules(facts, ruleDecisionSeed);
+    assert.equal(result.outcome, "MAIL_12");
     assert.equal(result.matchedRule?.priority, 0);
+  });
+
+  test("grupo R sin reembolso, dentro del plazo → MAIL_10, no ESCALATE", () => {
+    const facts = baseFacts({ stateGroup: "R", refundIssued: false, returnRefundStale: false });
+    const result = evaluateRules(facts, ruleDecisionSeed);
+    assert.equal(result.outcome, "MAIL_10");
+    assert.equal(result.matchedRule?.priority, 1);
+  });
+
+  test("grupo R sin reembolso y stale: el fail-safe de checkFailSafe intercepta antes que la fila MAIL_10", () => {
+    const facts = baseFacts({
+      stateGroup: "R",
+      refundIssued: false,
+      returnAgeBusinessDays: 12,
+      returnRefundStale: true,
+    });
+    const result = evaluateRules(facts, ruleDecisionSeed);
+    assert.equal(result.outcome, "ESCALATE");
+    // Viene del fail-safe en código, no de una fila de la matriz.
+    assert.equal(result.matchedRule, null);
+    assert.match(result.escalateReason!, /12 día/);
+  });
+});
+
+describe("evaluateRules — grupo F (estados de reembolso) → MAIL_REFUND", () => {
+  test("cualquier pedido del grupo F resuelve a MAIL_REFUND, sin condición de reembolso en la matriz", () => {
+    const facts = baseFacts({ stateGroup: "F", refundIssued: true });
+    const result = evaluateRules(facts, ruleDecisionSeed);
+    assert.equal(result.outcome, "MAIL_REFUND");
+  });
+
+  test("grupo F sin reembolso todavía registrado también resuelve a MAIL_REFUND en la matriz (buildGuidance decide si puede contestar)", () => {
+    const facts = baseFacts({ stateGroup: "F", refundIssued: false });
+    const result = evaluateRules(facts, ruleDecisionSeed);
+    assert.equal(result.outcome, "MAIL_REFUND");
+  });
+
+  test("grupo F no cae en el fail-safe del grupo D", () => {
+    const facts = baseFacts({ stateGroup: "F" });
+    assert.equal(checkFailSafe(facts), null);
   });
 });
 
@@ -555,17 +655,40 @@ describe("buildGuidance", () => {
     assert.equal(guidance.must_escalate, true);
   });
 
-  test("MAIL_12 resuelve processed_date en formato francés desde el contexto extra", () => {
+  test("MAIL_12 resuelve processed_date en formato francés y refund_method desde el contexto extra (T2)", () => {
+    // La plantilla de MAIL_12 pasó a exigir también refund_method (§ user requirement: "la info del
+    // pedido tiene que decir si una devolución se reembolsó como vale en vez de dinero"): sin
+    // `extra.refund`, este desenlace ahora escalaría por dato faltante.
     const evaluation: RuleEvaluationResult = {
       outcome: "MAIL_12",
       matchedRule: null,
       escalateReason: null,
     };
-    const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+    const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+      processedDate: utc(2026, 5, 1),
+      refund: { type: "MONEY", voucherExpiresAt: null, lineNames: [] },
+    });
+    assert.deepEqual(
+      guidance.facts_to_convey.sort((a, b) => a.key.localeCompare(b.key)),
+      [
+        { key: "processed_date", value: "01/05/2026" },
+        { key: "refund_method", value: "remboursement sur le moyen de paiement utilisé pour la commande" },
+      ]
+    );
+    assert.equal(guidance.must_escalate, false);
+  });
+
+  test("MAIL_12 sin extra.refund: refund_method es un dato faltante y se escala", () => {
+    const evaluation: RuleEvaluationResult = {
+      outcome: "MAIL_12",
+      matchedRule: null,
+      escalateReason: null,
+    };
+    const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
       processedDate: utc(2026, 5, 1),
     });
-    assert.deepEqual(guidance.facts_to_convey, [{ key: "processed_date", value: "01/05/2026" }]);
-    assert.equal(guidance.must_escalate, false);
+    assert.ok(guidance.missing_facts.includes("refund_method"));
+    assert.equal(guidance.must_escalate, true);
   });
 
   test("must_not_claim viaja tal cual desde la plantilla del desenlace", () => {
@@ -704,6 +827,176 @@ describe("buildGuidance", () => {
       const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed);
       assert.ok(!guidance.must_not_claim.includes(RETURN_TRACKING_PROHIBITION));
       assert.ok(!guidance.must_not_claim.includes(RETURN_STATUS_PROHIBITION));
+    });
+  });
+
+  // ─── refund_method / refunded_products / return_received_date (T2) ────
+  //
+  // Fact nuevo pedido por el usuario: "la info del pedido tiene que decir si una devolución se
+  // reembolsó como vale en vez de dinero". `extra.refund` alimenta tres cosas: el fact
+  // `refund_method` (VOUCHER/MONEY en francés), el fact `refunded_products`, y la prohibición
+  // dinámica de `must_not_claim` — igual patrón que `returnDataAvailable`.
+
+  const VOUCHER_REFUND_PROHIBITION =
+    "must not say the money was refunded to the customer's bank or card: this refund was issued as a " +
+    "store credit (avoir)";
+  const MONEY_REFUND_PROHIBITION = "must not describe this refund as a voucher or store credit (avoir)";
+
+  describe("buildGuidance — refund_method", () => {
+    test("VOUCHER sin voucherExpiresAt conocido: 'avoir', sin fecha", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        refund: { type: "VOUCHER", voucherExpiresAt: null, lineNames: [] },
+      });
+      const fact = guidance.facts_to_convey.find((f) => f.key === "refund_method");
+      assert.equal(fact?.value, "avoir");
+    });
+
+    test("VOUCHER con voucherExpiresAt conocido: agrega la caducidad en formato francés", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        refund: { type: "VOUCHER", voucherExpiresAt: utc(2026, 12, 31), lineNames: [] },
+      });
+      const fact = guidance.facts_to_convey.find((f) => f.key === "refund_method");
+      assert.equal(fact?.value, "avoir valable jusqu'au 31/12/2026");
+    });
+
+    test("MONEY: reembolso sobre el medio de pago original, sin caducidad", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        refund: { type: "MONEY", voucherExpiresAt: null, lineNames: [] },
+      });
+      const fact = guidance.facts_to_convey.find((f) => f.key === "refund_method");
+      assert.equal(fact?.value, "remboursement sur le moyen de paiement utilisé pour la commande");
+    });
+
+    test("sin extra.refund: refund_method es null (dato faltante), nunca se inventa", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+      });
+      assert.ok(guidance.missing_facts.includes("refund_method"));
+    });
+  });
+
+  describe("buildGuidance — prohibición dinámica vale/dinero", () => {
+    test("VOUCHER: agrega VOUCHER_REFUND_PROHIBITION, sea cual sea el desenlace", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        refund: { type: "VOUCHER", voucherExpiresAt: null, lineNames: [] },
+      });
+      assert.ok(guidance.must_not_claim.includes(VOUCHER_REFUND_PROHIBITION));
+      assert.ok(!guidance.must_not_claim.includes(MONEY_REFUND_PROHIBITION));
+    });
+
+    test("MONEY: agrega MONEY_REFUND_PROHIBITION", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_12", matchedRule: null, escalateReason: null };
+      const guidance = buildGuidance(evaluation, baseFacts({ stateGroup: "R", refundIssued: true }), baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 5, 1),
+        refund: { type: "MONEY", voucherExpiresAt: null, lineNames: [] },
+      });
+      assert.ok(guidance.must_not_claim.includes(MONEY_REFUND_PROHIBITION));
+      assert.ok(!guidance.must_not_claim.includes(VOUCHER_REFUND_PROHIBITION));
+    });
+
+    test("sin extra.refund: no agrega ninguna de las dos", () => {
+      const evaluation: RuleEvaluationResult = {
+        outcome: "MAIL_1",
+        matchedRule: { priority: 1, note: "nota" },
+        escalateReason: null,
+      };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed);
+      assert.ok(!guidance.must_not_claim.includes(VOUCHER_REFUND_PROHIBITION));
+      assert.ok(!guidance.must_not_claim.includes(MONEY_REFUND_PROHIBITION));
+    });
+
+    test("se agrega aunque el desenlace escale (mismo patrón que returnDataAvailable)", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "ESCALATE", matchedRule: null, escalateReason: "motivo" };
+      const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed, {
+        refund: { type: "VOUCHER", voucherExpiresAt: null, lineNames: [] },
+      });
+      assert.equal(guidance.must_escalate, true);
+      assert.ok(guidance.must_not_claim.includes(VOUCHER_REFUND_PROHIBITION));
+    });
+  });
+
+  // ─── MAIL_10 (retorno sin reembolso, A.6) y MAIL_REFUND (grupo F) — T2 ──
+
+  describe("buildGuidance — MAIL_10 (return_received_date)", () => {
+    test("resuelve order_reference y return_received_date en formato francés", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_10", matchedRule: { priority: 1, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "R", refundIssued: false, returnEnteredAt: utc(2026, 9, 20) });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed);
+      assert.equal(guidance.must_escalate, false);
+      assert.deepEqual(
+        guidance.facts_to_convey.sort((a, b) => a.key.localeCompare(b.key)),
+        [
+          { key: "order_reference", value: baseOrder.reference },
+          { key: "return_received_date", value: "20/09/2026" },
+        ]
+      );
+    });
+
+    test("sin returnEnteredAt: return_received_date es un dato faltante, se escala", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_10", matchedRule: { priority: 1, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "R", refundIssued: false, returnEnteredAt: null });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed);
+      assert.ok(guidance.missing_facts.includes("return_received_date"));
+      assert.equal(guidance.must_escalate, true);
+    });
+
+    test("el body de la plantilla es el texto A.6 transcrito", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_10", matchedRule: { priority: 1, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "R", refundIssued: false, returnEnteredAt: utc(2026, 9, 20) });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed);
+      assert.match(guidance.template_text!, /bien été reçu le \[Date\]/);
+    });
+  });
+
+  describe("buildGuidance — MAIL_REFUND (grupo F, T2)", () => {
+    test("con avoir disponible: resuelve las cuatro claves (order_reference, processed_date, refund_method, refunded_products)", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_REFUND", matchedRule: { priority: 13, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "F" });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 9, 18),
+        refund: { type: "MONEY", voucherExpiresAt: null, lineNames: ["Soutien-gorge corbeille", "Culotte"] },
+      });
+      assert.equal(guidance.must_escalate, false);
+      assert.deepEqual(
+        guidance.facts_to_convey.sort((a, b) => a.key.localeCompare(b.key)),
+        [
+          { key: "order_reference", value: baseOrder.reference },
+          { key: "processed_date", value: "18/09/2026" },
+          { key: "refund_method", value: "remboursement sur le moyen de paiement utilisé pour la commande" },
+          { key: "refunded_products", value: "Soutien-gorge corbeille, Culotte" },
+        ]
+      );
+    });
+
+    test("sin ningún avoir todavía: las cuatro claves relacionadas con el reembolso faltan, se escala", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_REFUND", matchedRule: { priority: 13, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "F" });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed);
+      assert.ok(guidance.missing_facts.includes("processed_date"));
+      assert.ok(guidance.missing_facts.includes("refund_method"));
+      assert.ok(guidance.missing_facts.includes("refunded_products"));
+      assert.equal(guidance.must_escalate, true);
+      assert.equal(guidance.can_answer, false);
+    });
+
+    test("avoir sin líneas cruzadas (ej. 100% envío): refunded_products falta, se escala igual", () => {
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_REFUND", matchedRule: { priority: 13, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "F" });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 9, 18),
+        refund: { type: "MONEY", voucherExpiresAt: null, lineNames: [] },
+      });
+      assert.ok(guidance.missing_facts.includes("refunded_products"));
+      assert.equal(guidance.must_escalate, true);
     });
   });
 

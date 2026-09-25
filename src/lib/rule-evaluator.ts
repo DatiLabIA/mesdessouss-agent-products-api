@@ -36,12 +36,14 @@ import type { RuleDecisionSeed, RuleOutcome, RuleTemplateSeed } from "../data/or
  * Orden de comprobación (no importa para el resultado, todas escalan igual,
  * pero sí para qué motivo se reporta primero si se dan varias a la vez):
  * 1. Grupo D: estado no cubierto por el documento (§2.1).
- * 2. Marca afectada sin plazo en la tabla (§2.4, §7.4: sin valores por defecto).
- * 3. Línea con stock indeterminable (`stockQuantity === null` en la entrada).
- * 4. Línea sin stock y sin marca informada: dato faltante que `order-facts.ts`
+ * 2. Grupo R (retorno terminado, §3.2) sin reembolso y con más de
+ *    `returnRefundMaxBusinessDays` días hábiles esperando uno.
+ * 3. Marca afectada sin plazo en la tabla (§2.4, §7.4: sin valores por defecto).
+ * 4. Línea con stock indeterminable (`stockQuantity === null` en la entrada).
+ * 5. Línea sin stock y sin marca informada: dato faltante que `order-facts.ts`
  *    deja pasar a propósito para que esta capa decida (ver el comentario de
  *    diseño en `computeOrderFacts` sobre por qué no inventa un nombre).
- * 5. `SIN_STOCK` sin un plazo de expedición fiable que calcular.
+ * 6. `SIN_STOCK` sin un plazo de expedición fiable que calcular.
  */
 export function checkFailSafe(facts: OrderFacts): string | null {
   if (facts.stateGroup === "D") {
@@ -49,6 +51,24 @@ export function checkFailSafe(facts: OrderFacts): string | null {
       "El estado del pedido pertenece al grupo D, no cubierto por ninguna regla del documento " +
       "(Annulé, Remboursé, Paiement erroné, etc.): se escala siempre, sin consultar la matriz (§2.1, §4 fila 12)."
     );
+  }
+
+  // Grupo R (retorno terminado, §3.2): si no hay reembolso todavía, la matriz decide entre
+  // MAIL_12/MAIL_10 según `refundIssued` (§ hallazgo A.6, docs/hallazgos-conversaciones-flow-test.md).
+  // Pero esperar sin límite un abono que podría no llegar nunca no es "en curso de tratamiento", es
+  // un caso que un humano tiene que mirar: por eso esta comprobación vive en código (fail-safe), no
+  // como una fila más editable de la matriz. `returnAgeBusinessDays` es `null` salvo que el pedido
+  // esté en el grupo R (ver `computeOrderFacts`), así que esta rama nunca dispara fuera de R.
+  if (facts.stateGroup === "R") {
+    if (facts.returnRefundStale) {
+      return (
+        `El pedido entró en estado 61 (retorno terminado) hace ${facts.returnAgeBusinessDays} día(s) hábil(es) ` +
+        "y todavía no hay ningún reembolso registrado (ni vale ni dinero): no tiene sentido seguir esperando " +
+        "un abono indefinidamente, se escala para que un humano lo revise (RuleSetting " +
+        "return_refund_max_business_days)."
+      );
+    }
+    return null;
   }
 
   // Las comprobaciones que siguen son todas sobre el stock, y el stock solo decide
@@ -142,6 +162,7 @@ function ruleMatches(rule: RuleDecisionSeed, facts: OrderFacts): boolean {
   if (!matchesDelayBucket(facts.delayBucket, rule.delayBucket ?? null)) return false;
   if (rule.hasTracking !== null && rule.hasTracking !== facts.hasTracking) return false;
   if (rule.historyHasInfo !== null && rule.historyHasInfo !== facts.historyHasInfo) return false;
+  if ((rule.refundIssued ?? null) !== null && rule.refundIssued !== facts.refundIssued) return false;
   return true;
 }
 
@@ -216,6 +237,21 @@ export interface GuidanceOrderContext {
 }
 
 /**
+ * Reembolso ya resuelto por la consolidación (`ConsolidatedRefund` en
+ * `order-consolidation.ts`), en la forma mínima que `resolveFactValue` necesita para redactar
+ * `refund_method`/`refunded_products` y que `buildGuidance` necesita para la prohibición dinámica
+ * vale/dinero. No se importa el tipo completo de `order-consolidation.ts` a propósito: ese módulo
+ * ya importa `GuidanceExtraContext` de acá, y hacerlo al revés crearía un ciclo.
+ */
+export interface GuidanceRefundContext {
+  type: "VOUCHER" | "MONEY";
+  /** Caducidad del vale. `null` si es dinero, o si el vale no caduca. */
+  voucherExpiresAt: Date | null;
+  /** Nombres de las líneas cubiertas por el reembolso; `null` cuando una línea no cruza con el pedido. */
+  lineNames: Array<string | null>;
+}
+
+/**
  * Datos que tampoco salen de `OrderFacts` ni de `GuidanceOrderContext` porque
  * viven en el historial de mensajes o en el avoir de una devolución, no en el
  * pedido en sí: productos pendientes y plazo adicional (mail 6, interpretados
@@ -228,6 +264,13 @@ export interface GuidanceExtraContext {
   pendingProducts?: string | null;
   additionalDelay?: string | null;
   processedDate?: Date | null;
+  /**
+   * Reembolso del pedido (mail 12, mail 10, y el grupo F de estados de reembolso), o `null`/
+   * `undefined` cuando no hay ningún avoir. Alimenta `refund_method`, `refunded_products` y la
+   * prohibición dinámica vale/dinero de `buildGuidance` (§ user requirement: "la info del pedido
+   * tiene que decir si una devolución se reembolsó como vale en vez de dinero").
+   */
+  refund?: GuidanceRefundContext | null;
   /**
    * `false` mientras el webservice no exponga `order_returns` (ver `ConsolidatedReturn.dataAvailable`
    * en `order-consolidation.ts`). Cuando es exactamente `false`, `buildGuidance` agrega las dos
@@ -249,6 +292,18 @@ const RETURN_TRACKING_PROHIBITION =
 const RETURN_STATUS_PROHIBITION =
   "must not state the status of a return in progress: this service cannot see returns that have not " +
   "been completed, so hand over to a human instead";
+
+/**
+ * Prohibiciones agregadas por `buildGuidance` cuando `extra.refund` no es `null`/`undefined`, sea
+ * cual sea el desenlace: mismo patrón que `RETURN_TRACKING_PROHIBITION`/`RETURN_STATUS_PROHIBITION`
+ * (§ user requirement: "la info del pedido tiene que decir si una devolución se reembolsó como vale
+ * en vez de dinero"). Una sola nunca puede faltar la otra: el reembolso es SIEMPRE vale o dinero,
+ * nunca las dos cosas a la vez.
+ */
+const VOUCHER_REFUND_PROHIBITION =
+  "must not say the money was refunded to the customer's bank or card: this refund was issued as a " +
+  "store credit (avoir)";
+const MONEY_REFUND_PROHIBITION = "must not describe this refund as a voucher or store credit (avoir)";
 
 /**
  * El bloque que Lia recibe para redactar la respuesta al cliente. `situation`
@@ -318,6 +373,32 @@ function formatOutOfStockProducts(facts: OrderFacts): string | null {
 }
 
 /**
+ * Texto en francés para el desenlace del reembolso (§ user requirement: "la info del pedido
+ * tiene que decir si una devolución se reembolsó como vale en vez de dinero"). `VOUCHER` agrega la
+ * caducidad cuando se conoce; `MONEY` no tiene fecha que agregar, el reembolso vuelve al medio de
+ * pago original. `null` cuando no hay ningún reembolso: nunca se inventa "todavía no hay reembolso"
+ * como si fuera el valor del hecho, eso lo decide `missing_facts` sobre el desenlace, no esta función.
+ */
+function formatRefundMethod(refund: GuidanceRefundContext): string {
+  if (refund.type === "VOUCHER") {
+    const expiry = refund.voucherExpiresAt !== null ? ` valable jusqu'au ${formatFrenchDate(refund.voucherExpiresAt)}` : "";
+    return `avoir${expiry}`;
+  }
+  return "remboursement sur le moyen de paiement utilisé pour la commande";
+}
+
+/**
+ * Nombres de las líneas cubiertas por el reembolso, separados por coma. `null` cuando ninguna línea
+ * cruzó con un nombre real (un avoir 100% de envío, o uno cuyas líneas no se pudieron cruzar con el
+ * pedido): no se arma una lista vacía ni se inventa un nombre, se trata como dato faltante (§7.4),
+ * igual que `formatOutOfStockProducts`.
+ */
+function formatRefundedProducts(refund: GuidanceRefundContext): string | null {
+  const names = refund.lineNames.filter((name): name is string => name !== null);
+  return names.length > 0 ? names.join(", ") : null;
+}
+
+/**
  * Resuelve el valor de una clave de `factsToConvey`. Devuelve `null` cuando
  * el dato no está disponible: nunca inventa un valor, y una clave que esta
  * función no reconoce se trata igual que un dato faltante (§7.4), nunca se
@@ -348,6 +429,12 @@ function resolveFactValue(
         : null;
     case "processed_date":
       return extra.processedDate != null ? formatFrenchDate(extra.processedDate) : null;
+    case "refund_method":
+      return extra.refund != null ? formatRefundMethod(extra.refund) : null;
+    case "refunded_products":
+      return extra.refund != null ? formatRefundedProducts(extra.refund) : null;
+    case "return_received_date":
+      return facts.returnEnteredAt !== null ? formatFrenchDate(facts.returnEnteredAt) : null;
     default:
       return null;
   }
@@ -404,6 +491,11 @@ export function buildGuidance(
   const mustNotClaim = [...(template?.mustNotClaim ?? [])];
   if (extra.returnDataAvailable === false) {
     mustNotClaim.push(RETURN_TRACKING_PROHIBITION, RETURN_STATUS_PROHIBITION);
+  }
+  // Mismo patrón, mismo motivo: agregada siempre que haya un reembolso, sin importar el desenlace
+  // ni qué plantilla ganó. Nunca las dos a la vez: el reembolso es vale O dinero.
+  if (extra.refund != null) {
+    mustNotClaim.push(extra.refund.type === "VOUCHER" ? VOUCHER_REFUND_PROHIBITION : MONEY_REFUND_PROHIBITION);
   }
 
   const mustEscalate = isRuleEscalate || missingTemplate || missingFacts.length > 0;

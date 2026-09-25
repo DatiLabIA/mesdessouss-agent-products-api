@@ -39,7 +39,7 @@ const EMAIL = process.argv[3] ?? "marie54140@hotmail.fr";
   const facts = computeOrderFacts(c.facts, {
     stateGroups,
     brandLeadDays: new Map(brandLeadTimeSeed.map((b) => [b.brandKey, b.leadDays])),
-    holidays, inStockLeadDays: 2, shortDelayMaxDays: 3,
+    holidays, inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7,
   });
 
   const verdict = evaluateRules(facts, ruleDecisionSeed);

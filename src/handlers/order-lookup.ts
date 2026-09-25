@@ -288,6 +288,7 @@ export function createOrderLookupHandler(deps: OrderLookupDeps = defaultDeps) {
         holidays: ruleSet.holidays,
         inStockLeadDays: ruleSet.settings.inStockLeadDays,
         shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+        returnRefundMaxBusinessDays: ruleSet.settings.returnRefundMaxBusinessDays,
       });
 
       const evaluation = evaluateRules(facts, ruleSet.decisions);

@@ -53,6 +53,7 @@ function decisionRow(overrides: Partial<RawDecisionRow> = {}): RawDecisionRow {
     delayBucket: "NONE",
     hasTracking: null,
     historyHasInfo: null,
+    refundIssued: null,
     outcome: "MAIL_1",
     note: "Confirmación estándar.",
     ...overrides,
@@ -77,6 +78,7 @@ function settingRow(overrides: Partial<RawSettingRow> = {}): RawSettingRow {
 const validSettings: RawSettingRow[] = [
   { key: "in_stock_lead_days", value: 2, note: null },
   { key: "short_delay_max_days", value: 3, note: null },
+  { key: "return_refund_max_business_days", value: 7, note: null },
 ];
 
 function utcDay(year: number, month: number, day: number): Date {
@@ -101,6 +103,11 @@ describe("parseStateGroups", () => {
   test("acepta stateName null", () => {
     const map = parseStateGroups([stateGroupRow({ stateName: null })]);
     assert.equal(map.get(2), "A");
+  });
+
+  test("acepta el grupo F (reembolso)", () => {
+    const map = parseStateGroups([stateGroupRow({ orderStateId: 83, groupCode: "F" })]);
+    assert.equal(map.get(83), "F");
   });
 
   test("groupCode fuera de A|B|C|D|R lanza RuleSetValidationError nombrando la fila", () => {
@@ -154,6 +161,7 @@ describe("parseDecisions", () => {
       delayBucket: "NONE",
       hasTracking: null,
       historyHasInfo: null,
+      refundIssued: null,
       outcome: "MAIL_1",
       note: "Confirmación estándar.",
     });
@@ -186,6 +194,28 @@ describe("parseDecisions", () => {
 
   test("outcome fuera del vocabulario cerrado lanza RuleSetValidationError", () => {
     assert.throws(() => parseDecisions([decisionRow({ outcome: "MAIL_99" as never })]), RuleSetValidationError);
+  });
+
+  test("acepta los desenlaces nuevos MAIL_10 y MAIL_REFUND", () => {
+    const rows = parseDecisions([
+      decisionRow({ priority: 1, outcome: "MAIL_10" }),
+      decisionRow({ priority: 2, outcome: "MAIL_REFUND", stateGroup: "F", stockStatus: null, delayBucket: null }),
+    ]);
+    assert.deepEqual(rows.map((r) => r.outcome), ["MAIL_10", "MAIL_REFUND"]);
+  });
+
+  test("refundIssued acepta true, false y null", () => {
+    for (const valor of [true, false, null] as const) {
+      const [row] = parseDecisions([decisionRow({ refundIssued: valor })]);
+      assert.equal(row.refundIssued, valor);
+    }
+  });
+
+  test("refundIssued no booleano lanza RuleSetValidationError", () => {
+    assert.throws(
+      () => parseDecisions([decisionRow({ refundIssued: "true" as never })]),
+      RuleSetValidationError
+    );
   });
 
   test("nota vacía lanza RuleSetValidationError (toda fila necesita nota legible)", () => {
@@ -237,6 +267,11 @@ describe("parseTemplates", () => {
   test("outcome fuera del vocabulario cerrado lanza RuleSetValidationError", () => {
     assert.throws(() => parseTemplates([templateRow({ outcome: "MAIL_99" })]), RuleSetValidationError);
   });
+
+  test("acepta los desenlaces nuevos MAIL_10 y MAIL_REFUND", () => {
+    const rows = parseTemplates([templateRow({ outcome: "MAIL_10" }), templateRow({ outcome: "MAIL_REFUND" })]);
+    assert.deepEqual(rows.map((r) => r.outcome), ["MAIL_10", "MAIL_REFUND"]);
+  });
 });
 
 // ─── parseRuleSettings ────────────────────────────────────────────────────
@@ -244,12 +279,12 @@ describe("parseTemplates", () => {
 describe("parseRuleSettings", () => {
   test("convierte los ajustes obligatorios a RuleSettingsConfig", () => {
     const settings = parseRuleSettings(validSettings);
-    assert.deepEqual(settings, { inStockLeadDays: 2, shortDelayMaxDays: 3 });
+    assert.deepEqual(settings, { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 });
   });
 
   test("ignora ajustes no reconocidos (p.ej. date_format) sin que afecten el resultado", () => {
     const settings = parseRuleSettings([...validSettings, settingRow({ key: "date_format", value: "DD/MM/YYYY" })]);
-    assert.deepEqual(settings, { inStockLeadDays: 2, shortDelayMaxDays: 3 });
+    assert.deepEqual(settings, { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 });
   });
 
   test("falta in_stock_lead_days → RuleSetValidationError", () => {
@@ -269,12 +304,37 @@ describe("parseRuleSettings", () => {
     assert.throws(() => parseRuleSettings(onlyInStock), RuleSetValidationError);
   });
 
+  test("falta return_refund_max_business_days → RuleSetValidationError", () => {
+    const sinUmbralDeRetorno = validSettings.filter((s) => s.key !== "return_refund_max_business_days");
+    assert.throws(
+      () => parseRuleSettings(sinUmbralDeRetorno),
+      (err: unknown) => {
+        assert.ok(err instanceof RuleSetValidationError);
+        assert.match((err as Error).message, /return_refund_max_business_days/);
+        return true;
+      }
+    );
+  });
+
   test("in_stock_lead_days no numérico → RuleSetValidationError", () => {
     assert.throws(
       () =>
         parseRuleSettings([
           settingRow({ key: "in_stock_lead_days", value: "dos" }),
           settingRow({ key: "short_delay_max_days", value: 3 }),
+          settingRow({ key: "return_refund_max_business_days", value: 7 }),
+        ]),
+      RuleSetValidationError
+    );
+  });
+
+  test("return_refund_max_business_days no numérico → RuleSetValidationError", () => {
+    assert.throws(
+      () =>
+        parseRuleSettings([
+          settingRow({ key: "in_stock_lead_days", value: 2 }),
+          settingRow({ key: "short_delay_max_days", value: 3 }),
+          settingRow({ key: "return_refund_max_business_days", value: "siete" }),
         ]),
       RuleSetValidationError
     );
@@ -318,7 +378,7 @@ describe("buildLoadedRuleSet", () => {
     assert.equal(loaded.brandLeadDays.get("aubade"), 5);
     assert.equal(loaded.decisions.length, 1);
     assert.equal(loaded.templates.length, 1);
-    assert.deepEqual(loaded.settings, { inStockLeadDays: 2, shortDelayMaxDays: 3 });
+    assert.deepEqual(loaded.settings, { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 });
     assert.equal(loaded.holidays.size, 0);
   });
 
