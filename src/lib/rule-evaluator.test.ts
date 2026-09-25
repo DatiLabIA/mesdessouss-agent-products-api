@@ -8,7 +8,7 @@ import {
   type GuidanceOrderContext,
   type RuleEvaluationResult,
 } from "./rule-evaluator";
-import { ruleDecisionSeed, ruleTemplateSeed, type RuleDecisionSeed } from "../data/order-rules-seed";
+import { ruleDecisionSeed, ruleTemplateSeed, type RuleDecisionSeed, type RuleTemplateSeed } from "../data/order-rules-seed";
 
 /**
  * Tests del evaluador de la matriz, del fail-safe y del constructor de
@@ -108,7 +108,7 @@ describe("alcance del fail-safe de stock", () => {
     assert.equal(r.outcome, "ESCALATE");
   });
 
-  test("grupo C con marca desconocida se reparte por el historial, no por el stock", () => {
+  test("grupo C con marca desconocida se reparte por el tracking (T3), no por el stock", () => {
     const r = evaluateRules(
       baseFacts({
         stateGroup: "C",
@@ -118,11 +118,11 @@ describe("alcance del fail-safe de stock", () => {
         brandCount: "ONE",
         leadDays: null,
         limitDate: null,
-        historyHasInfo: true,
+        hasTracking: true,
       }),
       ruleDecisionSeed
     );
-    assert.equal(r.outcome, "MAIL_6");
+    assert.equal(r.outcome, "MAIL_7");
   });
 
   test("en el grupo A la marca desconocida SÍ escala, que es donde el plazo importa", () => {
@@ -349,17 +349,22 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     assert.equal(result.matchedRule?.priority, 10);
   });
 
-  test("fila 10: Grupo C con historial con información → MAIL_6", () => {
-    const facts = baseFacts({ stateGroup: "C", historyHasInfo: true });
+  test("filas 10/11 (T3): Grupo C con tracking → MAIL_7", () => {
+    // `historyHasInfo` ya no decide nada para el grupo C (§ hallazgo 3,
+    // docs/hallazgos-conversaciones-flow-test.md: `computeHistoryHasInfo` nunca produce `true`, así
+    // que las dos filas originales del §4 nunca podían matchear a la vez un pedido real). Se
+    // construye a propósito con `historyHasInfo: null`, el valor real más común (hay algún mensaje
+    // público), para probar que ya no importa.
+    const facts = baseFacts({ stateGroup: "C", hasTracking: true, historyHasInfo: null });
     const result = evaluateRules(facts, ruleDecisionSeed);
-    assert.equal(result.outcome, "MAIL_6");
+    assert.equal(result.outcome, "MAIL_7");
     assert.equal(result.matchedRule?.priority, 11);
   });
 
-  test("fila 11: Grupo C sin información en el historial → MAIL_7", () => {
-    const facts = baseFacts({ stateGroup: "C", historyHasInfo: false });
+  test("filas 10/11 (T3): Grupo C sin tracking → ESCALATE", () => {
+    const facts = baseFacts({ stateGroup: "C", hasTracking: false, historyHasInfo: null });
     const result = evaluateRules(facts, ruleDecisionSeed);
-    assert.equal(result.outcome, "MAIL_7");
+    assert.equal(result.outcome, "ESCALATE");
     assert.equal(result.matchedRule?.priority, 12);
   });
 
@@ -371,13 +376,21 @@ describe("evaluateRules — matriz §4 (13 filas, siembra real)", () => {
     assert.equal(result.matchedRule, null);
   });
 
-  test("fila 13: cajón de sastre — combinación no capturada por ninguna fila anterior → ESCALATE", () => {
-    // Grupo C con historyHasInfo = null no matchea ni la fila 10 (exige true)
-    // ni la 11 (exige false): cae en el cajón de sastre.
-    const facts = baseFacts({ stateGroup: "C", historyHasInfo: null });
-    const result = evaluateRules(facts, ruleDecisionSeed);
+  test("fila 13 (cajón de sastre): matchea cualquier hecho cuando es la única fila disponible", () => {
+    // Antes de T3, un grupo C con `historyHasInfo: null` (el valor real más común: hay algún
+    // mensaje público) no matcheaba ni la fila 10 (exigía true) ni la 11 (exigía false) y caía
+    // acá — era, de hecho, el bug real de esta tarea (§ hallazgo 3,
+    // docs/hallazgos-conversaciones-flow-test.md). Tras T3 eso ya no ocurre: A, B, C y F quedan
+    // completamente cubiertos por sus propias filas (todas sus condiciones son booleanas, nunca
+    // `null`, en `OrderFacts` real) y D/R quedan resueltos por el fail-safe antes de llegar a la
+    // matriz — así que con la siembra actual y hechos reales, esta fila es inalcanzable. Sigue
+    // siendo una red de seguridad real para un conjunto de reglas cargado desde base que no cubra
+    // alguna combinación (edición futura por MCP): se verifica en aislamiento, evaluando solo ella.
+    const catchAll = ruleDecisionSeed.find((r) => r.stateGroup === null)!;
+    const facts = baseFacts({ stateGroup: "C", hasTracking: true, historyHasInfo: null });
+    const result = evaluateRules(facts, [catchAll]);
     assert.equal(result.outcome, "ESCALATE");
-    assert.equal(result.matchedRule?.priority, 15);
+    assert.equal(result.matchedRule?.priority, catchAll.priority);
   });
 });
 
@@ -620,14 +633,28 @@ describe("buildGuidance", () => {
     assert.equal(fact!.value, "Sujetador corbeille — Aubade");
   });
 
-  test("MAIL_6 resuelve pending_products, tracking_url y additional_delay cuando todo el contexto llega", () => {
+  // MAIL_6 ya no tiene plantilla sembrada (T3: su fila de la matriz se quitó, ver
+  // order-rules-seed.ts). `resolveFactValue` sigue resolviendo `pending_products`/`additional_delay`
+  // de forma genérica (no depende de qué plantilla los pida), así que estos dos tests siguen
+  // probando esa lógica con una plantilla local, sin depender de la siembra real.
+  const mail6TemplateFixture: RuleTemplateSeed[] = [
+    {
+      outcome: "MAIL_6",
+      lang: "fr",
+      body: "",
+      factsToConvey: ["pending_products", "tracking_url", "additional_delay"],
+      mustNotClaim: [],
+    },
+  ];
+
+  test("MAIL_6 (plantilla local, no sembrada) resuelve pending_products, tracking_url y additional_delay cuando todo el contexto llega", () => {
     const evaluation: RuleEvaluationResult = {
       outcome: "MAIL_6",
       matchedRule: { priority: 10, note: "nota" },
       escalateReason: null,
     };
     const order: GuidanceOrderContext = { ...baseOrder, trackingUrl: "https://exemple.test/suivi/ABC" };
-    const guidance = buildGuidance(evaluation, baseFacts({ hasTracking: true }), order, ruleTemplateSeed, {
+    const guidance = buildGuidance(evaluation, baseFacts({ hasTracking: true }), order, mail6TemplateFixture, {
       pendingProducts: "Sujetador Aubade talla 90B",
       additionalDelay: "5 días hábiles adicionales",
     });
@@ -642,17 +669,29 @@ describe("buildGuidance", () => {
     );
   });
 
-  test("MAIL_6 sin contexto extra: pending_products y additional_delay son datos faltantes", () => {
+  test("MAIL_6 (plantilla local, no sembrada) sin contexto extra: pending_products y additional_delay son datos faltantes", () => {
     const evaluation: RuleEvaluationResult = {
       outcome: "MAIL_6",
       matchedRule: { priority: 10, note: "nota" },
       escalateReason: null,
     };
     const order: GuidanceOrderContext = { ...baseOrder, trackingUrl: "https://exemple.test/suivi/ABC" };
-    const guidance = buildGuidance(evaluation, baseFacts(), order, ruleTemplateSeed);
+    const guidance = buildGuidance(evaluation, baseFacts(), order, mail6TemplateFixture);
     assert.ok(guidance.missing_facts.includes("pending_products"));
     assert.ok(guidance.missing_facts.includes("additional_delay"));
     assert.equal(guidance.must_escalate, true);
+  });
+
+  test("MAIL_6 contra la siembra real: sin plantilla sembrada, escala por missingTemplate (T3)", () => {
+    const evaluation: RuleEvaluationResult = {
+      outcome: "MAIL_6",
+      matchedRule: { priority: 10, note: "nota" },
+      escalateReason: null,
+    };
+    const guidance = buildGuidance(evaluation, baseFacts(), baseOrder, ruleTemplateSeed);
+    assert.equal(guidance.must_escalate, true);
+    assert.equal(guidance.reference_template, null);
+    assert.match(guidance.escalate_reason!, /No hay ninguna plantilla sembrada/);
   });
 
   test("MAIL_12 resuelve processed_date en formato francés y refund_method desde el contexto extra (T2)", () => {

@@ -379,16 +379,29 @@ export const ruleDecisionSeed: RuleDecisionSeed[] = [
     note: "Expedido pero sin número de seguimiento: salvaguarda para no enviar un enlace de seguimiento vacío (§4 fila 9).",
   },
   {
+    // Grupo C (T3, § hallazgo 3 "envío parcial: siempre deriva" de
+    // docs/hallazgos-conversaciones-flow-test.md): las dos filas originales (§4 filas 10/11)
+    // exigían `historyHasInfo` true/false EXACTO, pero `computeHistoryHasInfo` (order-consolidation.ts)
+    // nunca devuelve `true` — solo `false` (sin ningún mensaje público real) o `null` (hay al menos
+    // uno, pero su contenido no se interpreta). La fila del mail 6 (`true`) era letra muerta desde
+    // que se escribió, y CUALQUIER pedido con un mensaje público real (el caso más común: 3 de 3
+    // pedidos reales reproducidos) caía en `null`, no matcheaba ninguna de las dos filas, y terminaba
+    // en el cajón de sastre. Se reemplazan por `hasTracking`, un hecho que SIEMPRE se conoce (nunca
+    // `null`, a diferencia de `historyHasInfo`): con seguimiento hay algo verificable que decir
+    // (MAIL_7, texto A.3); sin él, no hay nada fiable que ofrecer y se escala.
     priority: 11,
     stateGroup: "C",
     stockStatus: null,
     brandCount: null,
     delayBucket: null,
-    hasTracking: null,
-    historyHasInfo: true,
+    hasTracking: true,
+    historyHasInfo: null,
     refundIssued: null,
-    outcome: "MAIL_6",
-    note: "Expedición parcial con historial que indica productos pendientes y/o plazo (§4 fila 10).",
+    outcome: "MAIL_7",
+    note:
+      "Expedición parcial con número de seguimiento disponible: se informa el envío parcial y el " +
+      "enlace de seguimiento, sin inventar qué productos van en cada expedición (§4 fila 10/11, " +
+      "reemplazadas por T3 — ver hallazgo 3 de docs/hallazgos-conversaciones-flow-test.md).",
   },
   {
     priority: 12,
@@ -396,11 +409,16 @@ export const ruleDecisionSeed: RuleDecisionSeed[] = [
     stockStatus: null,
     brandCount: null,
     delayBucket: null,
-    hasTracking: null,
-    historyHasInfo: false,
+    hasTracking: false,
+    historyHasInfo: null,
     refundIssued: null,
-    outcome: "MAIL_7",
-    note: "Expedición parcial sin información útil en el historial (§4 fila 11).",
+    outcome: "ESCALATE",
+    note:
+      "Expedición parcial sin número de seguimiento: no hay ni un enlace verificable que dar, se " +
+      "escala (§4 fila 10/11, reemplazadas por T3). El mail 6 (productos pendientes + fecha de " +
+      "reposición, texto A.4 del equipo) NO se siembra: esa fecha solo existe hoy en notas internas " +
+      "(§4 del documento de hallazgos), que ya no llegan a Lia desde T1, y no hay otra fuente fiable " +
+      "para no inventarla (§7.4).",
   },
   {
     // Grupo F (reembolso, § hallazgo "Mejora E" de docs/hallazgos-conversaciones-flow-test.md):
@@ -605,27 +623,35 @@ export const ruleTemplateSeed: RuleTemplateSeed[] = [
       "must not commit to a ship date earlier than limit_date",
     ],
   },
-  {
-    outcome: "MAIL_6",
-    lang: "fr",
-    // Pendiente de importar desde scenario_lia.numbers (Feuil2, mail 6).
-    body: "",
-    factsToConvey: ["pending_products", "tracking_url", "additional_delay"],
-    mustNotClaim: [
-      "must not claim the full order has shipped when only part of it has",
-      "must not invent a delay figure that is not present in the order history",
-    ],
-  },
+  // No se siembra ninguna plantilla MAIL_6 (T3): su fila de la matriz se quitó (ver el comentario de
+  // la fila de prioridad 12 más arriba) porque el texto A.4 del equipo (productos pendientes + fecha
+  // de reposición) necesita un dato — la fecha de reposición de cada producto pendiente — que hoy
+  // solo vive en notas internas, y esas ya no llegan a Lia desde T1 (§ hallazgo 3,
+  // docs/hallazgos-conversaciones-flow-test.md). Sembrar una plantilla para un desenlace sin fila que
+  // lo seleccione dejaría configuración muerta que podría hacer pensar a quien edite el conjunto de
+  // reglas por MCP que MAIL_6 ya está disponible: se quita entera (fila y plantilla) hasta que exista
+  // una fuente fiable para esa fecha. `MAIL_6` sigue siendo un `RuleOutcome`/`RULE_OUTCOMES` válido
+  // por si el día que exista esa fuente se agregan la fila y la plantilla de nuevo.
   {
     outcome: "MAIL_7",
     lang: "fr",
-    // Pendiente de importar desde scenario_lia.numbers (Feuil2, mail 7).
-    body: "",
-    factsToConvey: [],
+    // Texto A.3 del Anexo A (docs/hallazgos-conversaciones-flow-test.md), transcrito literal: nota
+    // de la conversación 5539f563 (pedido NQWWBQUNW), un envío parcial sin fecha de reposición. El
+    // marcador "(Lien de suivi)" es del propio equipo, se mantiene literal (lo resuelve `tracking_url`).
+    body: [
+      "Bonjour,",
+      "",
+      "Votre commande a fait l'objet d'une expédition partielle. Vous trouverez le lien de suivi ci-dessous.",
+      "(Lien de suivi)",
+      "Vous recevrez prochainement un e-mail vous indiquant les produits qui ont été expédiés ainsi que ceux restant à expédier.",
+      "",
+      "Nous vous remercions pour votre patience et votre compréhension.",
+    ].join("\n"),
+    factsToConvey: ["order_reference", "tracking_url"],
     mustNotClaim: [
-      "must not invent a reason for the partial delivery",
-      "must not provide a date or a delay figure, since none is available",
-      "must not claim the full order has shipped when only part of it has",
+      "must not state which products were shipped or which are still pending, since that is not known here",
+      "must not promise a date for the remaining products",
+      "must not claim the whole order has been delivered",
     ],
   },
   {
