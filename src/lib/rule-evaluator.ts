@@ -432,13 +432,17 @@ function formatRefundMethod(refund: GuidanceRefundContext): string {
 
 /**
  * Nombres de las líneas cubiertas por el reembolso, separados por coma. `null` cuando ninguna línea
- * cruzó con un nombre real (un avoir 100% de envío, o uno cuyas líneas no se pudieron cruzar con el
- * pedido): no se arma una lista vacía ni se inventa un nombre, se trata como dato faltante (§7.4),
- * igual que `formatOutOfStockProducts`.
+ * cruzó con un nombre real (un avoir 100% de envío) O CUANDO CUALQUIERA de ellas no cruzó (un
+ * `id_order_detail` que no aparece entre las líneas del pedido): no se arma una lista PARCIAL. Decir
+ * "se reembolsó tu sujetador" cuando en realidad el avoir también cubría otro producto que no se
+ * pudo nombrar es un hecho incompleto de cara al cliente, tan malo como inventar un nombre — se
+ * trata como dato faltante entero (§7.4), nunca se calla en silencio la línea que faltó. Mismo
+ * criterio que `formatOutOfStockProducts` con una línea sin marca.
  */
 function formatRefundedProducts(refund: GuidanceRefundContext): string | null {
-  const names = refund.lineNames.filter((name): name is string => name !== null);
-  return names.length > 0 ? names.join(", ") : null;
+  if (refund.lineNames.length === 0) return null;
+  if (refund.lineNames.some((name) => name === null)) return null;
+  return refund.lineNames.join(", ");
 }
 
 /**

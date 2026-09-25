@@ -1037,6 +1037,24 @@ describe("buildGuidance", () => {
       assert.ok(guidance.missing_facts.includes("refunded_products"));
       assert.equal(guidance.must_escalate, true);
     });
+
+    test("avoir con UNA línea sin cruzar entre varias (ej. ['Culotte', null]): refunded_products falta ENTERO, nunca una lista parcial", () => {
+      // Bug fijo: antes se filtraban los `null` en silencio y se reportaba solo "Culotte", un hecho
+      // incompleto de cara al cliente (el avoir también cubría otro producto que no se pudo
+      // nombrar). Ahora cualquier línea sin nombre invalida la lista entera (§7.4).
+      const evaluation: RuleEvaluationResult = { outcome: "MAIL_REFUND", matchedRule: { priority: 13, note: "nota" }, escalateReason: null };
+      const facts = baseFacts({ stateGroup: "F" });
+      const guidance = buildGuidance(evaluation, facts, baseOrder, ruleTemplateSeed, {
+        processedDate: utc(2026, 9, 18),
+        refund: { type: "MONEY", voucherExpiresAt: null, lineNames: ["Culotte", null] },
+      });
+      assert.ok(guidance.missing_facts.includes("refunded_products"));
+      assert.ok(
+        !guidance.facts_to_convey.some((f) => f.key === "refunded_products"),
+        "refunded_products no debe aparecer como hecho resuelto cuando la lista está incompleta"
+      );
+      assert.equal(guidance.must_escalate, true);
+    });
   });
 
   test("reply_language: id_lang 1/2/3 resuelven a fr/en/es", () => {

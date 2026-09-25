@@ -552,7 +552,7 @@ export function createMcpServer(): McpServer {
   // ─── set_state_group ─────────────────────────────────────────────────────
   server.tool(
     "set_state_group",
-    "Asigna el grupo del árbol de decisión a un estado de PrestaShop, dentro de un BORRADOR (create_rule_draft primero). A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, R=bloque retorno. Alta o actualización (upsert) por order_state_id. No se puede editar el conjunto activo.",
+    "Asigna el grupo del árbol de decisión a un estado de PrestaShop, dentro de un BORRADOR (create_rule_draft primero). A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, R=bloque retorno (estado 61 terminado: responde MAIL_12 o MAIL_10 según si ya hay reembolso), F=reembolsado (estados de reembolso: el pedido tiene avoir/abono; responde MAIL_REFUND). Alta o actualización (upsert) por order_state_id. No se puede editar el conjunto activo.",
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
       orderStateId: z
@@ -560,7 +560,12 @@ export function createMcpServer(): McpServer {
         .int()
         .describe("id del estado en PrestaShop (order_states.id). El mapeo es siempre por id, nunca por nombre: los nombres de estado cambian."),
       stateName: z.string().nullable().describe("Nombre del estado, solo para lectura humana. Nunca se usa para matchear."),
-      groupCode: z.enum(STATE_GROUP_CODES).describe("Grupo del árbol de decisión: A, B, C, D o R."),
+      groupCode: z
+        .enum(STATE_GROUP_CODES)
+        .describe(
+          "Grupo del árbol de decisión: A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, " +
+            "F=reembolsado (avoir/abono ya emitido, responde MAIL_REFUND), o R=bloque retorno (estado 61 terminado)."
+        ),
     },
     async ({ version, orderStateId, stateName, groupCode }) => {
       try {
@@ -606,7 +611,13 @@ export function createMcpServer(): McpServer {
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
       priority: z.number().int().describe("Orden de evaluación, ascendente. Gana la primera fila que matchea los hechos del pedido."),
-      stateGroup: z.enum(STATE_GROUP_CODES).nullable().describe("Grupo requerido, o null = cualquiera."),
+      stateGroup: z
+        .enum(STATE_GROUP_CODES)
+        .nullable()
+        .describe(
+          "Grupo requerido (A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar, " +
+            "F=reembolsado, R=bloque retorno), o null = cualquiera."
+        ),
       stockStatus: z.enum(STOCK_STATUSES).nullable().describe("Estado de stock del pedido requerido, o null = cualquiera."),
       brandCount: z
         .enum(BRAND_COUNTS)
@@ -627,7 +638,13 @@ export function createMcpServer(): McpServer {
         .describe(
           "Si requiere que ya haya un reembolso registrado (true) o que no lo haya (false), o null = cualquiera. Solo lo usan las filas del grupo R (bloque RETORNO)."
         ),
-      outcome: z.enum(RULE_OUTCOMES).describe("Desenlace de esta fila: qué mail corresponde, o ESCALATE."),
+      outcome: z
+        .enum(RULE_OUTCOMES)
+        .describe(
+          "Desenlace de esta fila: qué mail corresponde (incluidos MAIL_10 y MAIL_REFUND), o ESCALATE. " +
+            "MAIL_8 nunca debería usarse acá: ninguna fila de la matriz lo selecciona, se entrega aparte " +
+            "como guidance.return_inquiry cuando el pedido no está en el grupo R ni F (ver set_template)."
+        ),
       note: z
         .string()
         .min(1)
@@ -654,7 +671,14 @@ export function createMcpServer(): McpServer {
     "Da de alta o actualiza la plantilla de un desenlace (outcome), dentro de un BORRADOR (create_rule_draft primero): el texto base aprobado, los datos que Lia tiene que transmitir (facts_to_convey), las afirmaciones que tiene prohibido hacer (must_not_claim) y si el desenlace tiene que marcarse para que el equipo lo revise (notify_team). Alta o actualización (upsert) por outcome+lang. No se puede editar el conjunto activo.",
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
-      outcome: z.enum(RULE_OUTCOMES).describe("Desenlace al que corresponde esta plantilla."),
+      outcome: z
+        .enum(RULE_OUTCOMES)
+        .describe(
+          "Desenlace al que corresponde esta plantilla (incluidos MAIL_10 y MAIL_REFUND). MAIL_8 es especial: " +
+            "ninguna fila de la matriz lo selecciona (ver set_decision_rule), pero SÍ conviene sembrarle una " +
+            "plantilla acá — buildGuidance la ofrece aparte, como guidance.return_inquiry, para cuando el " +
+            "cliente pregunte por una devolución de un pedido que no está en el grupo R ni F."
+        ),
       lang: z.enum(RULE_TEMPLATE_LANGS).describe("Idioma de la plantilla. Hoy el runtime solo usa 'fr'."),
       body: z.string().describe("Texto base aprobado. Puede quedar vacío si todavía no hay texto aprobado para este desenlace."),
       factsToConvey: z

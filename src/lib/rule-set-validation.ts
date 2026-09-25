@@ -297,8 +297,29 @@ export interface RuleSettingsConfig {
 const REQUIRED_NUMERIC_SETTINGS = [
   { key: "in_stock_lead_days", field: "inStockLeadDays" },
   { key: "short_delay_max_days", field: "shortDelayMaxDays" },
-  { key: "return_refund_max_business_days", field: "returnRefundMaxBusinessDays" },
 ] as const;
+
+/**
+ * Clave y campo del único ajuste OPCIONAL: `return_refund_max_business_days`. A diferencia de los
+ * dos de `REQUIRED_NUMERIC_SETTINGS` (que existen desde el primer conjunto de reglas), T2 agregó
+ * este DESPUÉS de que ya hubiera un conjunto activo en producción. Exigirlo como los otros dos
+ * significa que `loadActiveRuleSet` lanza para el conjunto activo real de hoy (que predata T2), y el
+ * handler de `order_lookup` devuelve 503 para CUALQUIER consulta verificada — un corte total del
+ * servicio, no la escalada puntual de un pedido — hasta que alguien publique un conjunto nuevo.
+ *
+ * Fallar cerrado tiene sentido para un dato de negocio que Lia necesita para redactar (§7.4); no
+ * tiene sentido para el umbral interno de un fail-safe de código cuando el propio texto ya aprobado
+ * por el equipo (A.6: "délai maximum de 7 jours") ya da un valor razonable por defecto. Si la fila
+ * SÍ existe pero es inválida (no numérica), la validación sigue fallando igual que cualquier otro
+ * ajuste — el problema ahí no es que falte la migración, es un dato roto.
+ */
+const RETURN_REFUND_MAX_BUSINESS_DAYS_SETTING = {
+  key: "return_refund_max_business_days",
+  field: "returnRefundMaxBusinessDays",
+} as const;
+
+/** Valor por defecto de `return_refund_max_business_days` cuando el ajuste no existe todavía. Ver el JSDoc de arriba. */
+export const DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS = 7;
 
 /**
  * Resuelve `RuleSettingsConfig` a partir de las filas de `rule_settings`.
@@ -329,6 +350,20 @@ export function parseRuleSettings(rows: readonly RawSettingRow[]): RuleSettingsC
     }
     result[field] = numeric.data;
   }
+
+  const { key: returnRefundKey, field: returnRefundField } = RETURN_REFUND_MAX_BUSINESS_DAYS_SETTING;
+  if (!byKey.has(returnRefundKey)) {
+    result[returnRefundField] = DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS;
+  } else {
+    const numeric = numericSettingValueSchema.safeParse(byKey.get(returnRefundKey));
+    if (!numeric.success) {
+      throw new RuleSetValidationError(
+        `El ajuste "${returnRefundKey}" debe ser numérico; se recibió ${JSON.stringify(byKey.get(returnRefundKey))}.`
+      );
+    }
+    result[returnRefundField] = numeric.data;
+  }
+
   return result;
 }
 

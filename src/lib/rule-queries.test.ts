@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildLoadedRuleSet,
+  DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS,
   parseBrandLeadDays,
   parseDecisions,
   parseHolidays,
@@ -332,16 +333,27 @@ describe("parseRuleSettings", () => {
     assert.throws(() => parseRuleSettings(onlyInStock), RuleSetValidationError);
   });
 
-  test("falta return_refund_max_business_days → RuleSetValidationError", () => {
+  test("falta return_refund_max_business_days: usa el valor por defecto (7 días hábiles), no lanza", () => {
+    // T2 agregó este ajuste DESPUÉS de que ya hubiera un conjunto activo en producción: exigirlo
+    // como los otros dos convertiría "falta un ajuste nuevo" en un 503 para cualquier consulta
+    // verificada (ver el JSDoc de DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS en rule-set-validation.ts).
     const sinUmbralDeRetorno = validSettings.filter((s) => s.key !== "return_refund_max_business_days");
-    assert.throws(
-      () => parseRuleSettings(sinUmbralDeRetorno),
-      (err: unknown) => {
-        assert.ok(err instanceof RuleSetValidationError);
-        assert.match((err as Error).message, /return_refund_max_business_days/);
-        return true;
-      }
-    );
+    const settings = parseRuleSettings(sinUmbralDeRetorno);
+    assert.equal(settings.returnRefundMaxBusinessDays, DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS);
+    assert.deepEqual(settings, { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 });
+  });
+
+  test("conjunto de reglas con forma anterior a T2 (solo los dos ajustes originales) carga igual", () => {
+    const oldShapeSettings: RawSettingRow[] = [
+      { key: "in_stock_lead_days", value: 2, note: null },
+      { key: "short_delay_max_days", value: 3, note: null },
+    ];
+    const settings = parseRuleSettings(oldShapeSettings);
+    assert.deepEqual(settings, {
+      inStockLeadDays: 2,
+      shortDelayMaxDays: 3,
+      returnRefundMaxBusinessDays: DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS,
+    });
   });
 
   test("in_stock_lead_days no numérico → RuleSetValidationError", () => {
