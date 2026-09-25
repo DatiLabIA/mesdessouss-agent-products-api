@@ -49,7 +49,8 @@ export function checkFailSafe(facts: OrderFacts): string | null {
   if (facts.stateGroup === "D") {
     return (
       "El estado del pedido pertenece al grupo D, no cubierto por ninguna regla del documento " +
-      "(Annulé, Remboursé, Paiement erroné, etc.): se escala siempre, sin consultar la matriz (§2.1, §4 fila 12)."
+      "(Annulé, Paiement erroné, etc.): se escala siempre, sin consultar la matriz (§2.1, §4 fila 12). Los " +
+      "estados de reembolso (antes ejemplo de este grupo) tienen su propio grupo F desde T2."
     );
   }
 
