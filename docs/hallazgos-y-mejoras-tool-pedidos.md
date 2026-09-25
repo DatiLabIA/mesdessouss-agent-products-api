@@ -172,6 +172,8 @@ Se implementó el §3.1: las comprobaciones de stock del fail-safe aplican **sol
 
 ## 10. Lo que falta en este documento
 
+> **Hecho:** la revisión de las conversaciones (62 hasta el 25/09) está en [hallazgos-conversaciones-flow-test.md](hallazgos-conversaciones-flow-test.md). Corrige una conclusión del §4: los estados de reembolso no deberían escalar. Y su Anexo A trae los textos que el equipo escribió en las revisiones, que desbloquean en parte la Mejora 1.
+
 **La revisión de las conversaciones del flow de test.** El conector MCP de DatiHub (`claude.ai prompt mesdessous`) se cayó tres veces el 23/09 y está caído al cerrar este documento, así que no se pudieron leer.
 
 Cuando vuelva, el procedimiento es:
