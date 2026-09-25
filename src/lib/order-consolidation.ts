@@ -1170,13 +1170,17 @@ export async function consolidateOrder(
 
   // ─── Ensamblado ─────────────────────────────────────────────────────
 
+  // `id_customer_thread` llega como string ("184425") aunque el tipo diga number, y el mapa se
+  // consulta con `thread.id`, que sí es numérico: sin normalizar la clave, ningún hilo encontraba
+  // sus mensajes, `lastMessage` salía siempre null y el hilo "más activo" se elegía a ciegas.
   const messagesByThread = new Map<number, CustomerMessageRecord[]>();
   for (const message of allMessages) {
-    const bucket = messagesByThread.get(message.id_customer_thread);
+    const threadId = toNumericId(message.id_customer_thread);
+    const bucket = messagesByThread.get(threadId);
     if (bucket) {
       bucket.push(message);
     } else {
-      messagesByThread.set(message.id_customer_thread, [message]);
+      messagesByThread.set(threadId, [message]);
     }
   }
 

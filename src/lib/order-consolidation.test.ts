@@ -501,6 +501,32 @@ describe("consolidateOrder — conversación", () => {
     assert.equal(result.conversation.lastMessage, "Bonjour, où en est ma commande ?");
   });
 
+  test("id_customer_thread llega como string (forma real de la API): lastMessage se resuelve igual", async () => {
+    stub({
+      customerThreads: {
+        body: JSON.stringify({
+          customer_threads: [
+            { id: 903, id_order: ORDER_ID, email: CUSTOMER_EMAIL, status: "open", date_add: "2026-09-18 10:00:00", date_upd: "2026-09-18 10:00:00" },
+          ],
+        }),
+      },
+      customerMessages: {
+        body: JSON.stringify({
+          customer_messages: [
+            { id: 5, id_customer_thread: "903", id_employee: "0", private: "0", message: "Où en est ma commande ?", date_add: "2026-09-18 10:00:00" },
+            { id: 6, id_customer_thread: "903", id_employee: "62", private: "0", message: "Bonjour, votre commande part demain.", date_add: "2026-09-18 11:00:00" },
+          ],
+        }),
+      },
+    });
+
+    const result = await consolidateOrder(buildInput(), STATE_GROUPS);
+
+    assert.equal(result.conversation.threadId, 903);
+    assert.equal(result.conversation.lastMessage, "Bonjour, votre commande part demain.");
+    assert.notEqual(result.conversation.lastMessageDate, null);
+  });
+
   test("el último mensaje público ya fue respondido por un empleado: awaitingShopReply false", async () => {
     stub({
       customerThreads: {
