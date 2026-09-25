@@ -313,29 +313,123 @@ En `552ed281` el email del pedido era una dirección de Amazon Marketplace (`…
 
 ---
 
+## 12. Verificación con datos reales y correcciones (25/09)
+
+Se consultó el webservice de PrestaShop de producción **en modo solo lectura**, con autorización expresa, para validar tres temas antes de corregir: mensajes privados, estados y devoluciones. Las correcciones están en la rama `feat/lia-order-lookup-review-fixes`, que **todavía no está desplegada** (§12.5).
+
+### 12.1 Mensajes privados
+
+Muestra: los 600 mensajes más recientes (22/09 → 25/09).
+
+| `id_employee` | `private` | Qué es | Mensajes |
+|---|---|---|---|
+| 0 | 1 | Registros del medio de pago | 288 |
+| > 0 | 0 | Respuestas de la tienda al cliente | 118 |
+| 0 | 0 | Mensajes del cliente desde la web | 62 |
+| > 0 | 1 | **Mezcla**: notas internas, correos del cliente pegados por el equipo, respuestas enviadas desde el buzón | 132 |
+
+- **Todas** las notas internas encontradas tienen `private = 1`: "C13FMK 01N - Délai…", "VIREMENT … CE JOUR", "code avoir supprimé", "!! COMMANDE BLOQUÉE…", e incluso *"je peux plus me la voir cette cliente"*.
+- **Ninguna** nota interna tiene `private = 0`.
+- Ningún otro campo del mensaje (IP, navegador, adjunto, leído, fechas) separa las notas de los correos pegados: todos vienen vacíos o iguales.
+
+**Corregido:** a Lia solo le llegan mensajes con `private = 0`. Dentro de ese grupo, `id_employee` indica con fiabilidad quién escribe (0 = cliente, > 0 = tienda).
+
+El costo, aceptado: Lia deja de ver los correos del cliente que el equipo pega a mano, porque son privados.
+
+Al verificarlo apareció otro fallo: `lastMessage` salía **siempre** vacío, porque el id del hilo llega como texto. También está corregido.
+
+### 12.2 Estados de pedido
+
+El catálogo tiene 64 estados. Pedidos por estado actual (últimos 8.000 pedidos, 27/07 → 25/09):
+
+| Estado | Pedidos | Grupo |
+|---|---|---|
+| 10 Commande Terminée | 6.134 | B |
+| 61 Retour Terminé | 483 | R |
+| 31 Livraison En Cours | 409 | B |
+| 17 Commande en cours de traitement | 284 | A |
+| 9 Commande enregistrée | 225 | A |
+| 83 Remboursé avec Sogecommerce | 104 | **F (nuevo)** |
+| 68 Remboursement partiel | 78 | **F (nuevo)** |
+| 5 Livré | 67 | B |
+| 4 En cours de livraison | 55 | B |
+| 2 Paiement validé | 47 | A |
+| 7 Remboursé | 40 | **F (nuevo)** |
+| 78 Autorisation annulée | 24 | D |
+| 14 Livraison partielle | 23 | C |
+| 6 Annulé · 1 · 18 · 8 · 20 · 70 | 27 | D (salvo 18, que es A) |
+
+**El webservice no expone ningún recurso de devoluciones** (`order_returns` y `order_return_states` no existen). El estado 61 es la única señal de devolución.
+
+### 12.3 Devoluciones: cupón o dinero
+
+Muestra: los 300 abonos más recientes (10/09 → 24/09).
+
+- **El campo `order_slip_type` no distingue** cupón de dinero: sus tres valores aparecen en los dos casos.
+- **El código del cupón sí lo distingue.** 81 de 300 abonos (27%) tienen un cupón `V{id}C{cliente}O{pedido}`, que es lo que la tool ya buscaba.
+- Los cupones ya usados siguen activos (con cantidad 0), así que no se pierden.
+- Los códigos `…-2` son el saldo de un cupón usado en parte; no hacen que ningún abono se clasifique mal.
+
+**Cuándo llega el abono.** En los 200 pedidos más recientes en estado 61, el abono llega después de entrar en 61: mediana de ~2 horas, máximo de 14 días.
+
+De esos 200, 21 no tienen abono todavía: 16 llevan menos de un día y 5 llevan entre 2,6 y 23,7 días.
+
+**Corregido:**
+- La información para Lia dice ahora cómo se reembolsó: *"avoir valable jusqu'au 18/09/2027"* o *"remboursement sur le moyen de paiement utilisé pour la commande"*. Además se le prohíbe decir lo contrario.
+- **Estado 61 sin abono** → nuevo `MAIL_10`, con el texto A.6 y la fecha en que el pedido entró en 61. Si pasaron más de 7 días hábiles, se escala.
+- **Estados 83, 68 y 7** → nuevo grupo F y `MAIL_REFUND`, con fecha, método de reembolso y productos reembolsados. Si falta el nombre de algún producto, se escala: nunca se da una lista a medias.
+
+### 12.4 El resto de las correcciones
+
+- **Envío parcial:** el grupo C decide ahora por el número de seguimiento. Antes lo hacía por un dato que nunca valía "sí". Con seguimiento → `MAIL_7` (texto A.3); sin seguimiento → escalar.
+- **Textos del equipo:** `MAIL_15` = A.1 y `MAIL_1` = A.2. A.2 se copió literal, erratas incluidas, y el equipo debe corregirlas. `MAIL_8` = A.5 se ofrece en `guidance.return_inquiry` en los pedidos que no están en devolución ni reembolsados, por si el cliente pregunta por una devolución.
+- **"Notification Zimbra" = escalar al equipo.** Nuevo campo `guidance.notify_team`. Vale `true` en `MAIL_15`, cuyo texto promete volver en 48 horas, y en todo caso escalado. **El servicio no envía nada:** la acción de notificar se habilita después.
+- **Catálogo:** el estado 5 "Livré" se añadió al grupo B en la siembra; hasta ahora solo estaba en la base, añadido a mano.
+
+Verificado con el pipeline completo sobre pedidos reales, en solo lectura:
+
+| Pedido | Antes | Ahora |
+|---|---|---|
+| ZCQJGLQSK, NQWWBQUNW, EFUBKXELE (parcial) | escalar | `MAIL_7` |
+| QVRFQFOQB, LQTQJXTUR (retraso) | `MAIL_15` vacío | `MAIL_15` con texto A.1 y `notify_team: true` |
+| JBIZNYEPA (83) | escalar | `MAIL_REFUND` |
+| RYOTSAWVN (61 con cupón) | `MAIL_12` sin método | `MAIL_12` + "avoir valable jusqu'au 18/09/2027" |
+| MUJJABSBJ (61 sin abono) | escalar | `MAIL_10`, recibido el 24/09/2026 |
+
+`pnpm build` limpio y 274 tests en verde. Un verificador independiente revisó los cambios de devoluciones. Su hallazgo crítico está corregido: el ajuste nuevo de 7 días era obligatorio, y con el conjunto de reglas activo hoy **todas** las consultas habrían devuelto 503 tras el despliegue. Ahora toma 7 por defecto cuando falta.
+
+### 12.5 Lo que falta para que llegue a producción
+
+Cada paso es una decisión aparte y ninguno se ejecutó:
+
+1. **Desplegar la rama.** `start:prod` aplica solo las dos migraciones nuevas, que únicamente añaden columnas.
+2. **Publicar un conjunto de reglas nuevo** con `create_rule_draft`, `simulate_rules` y `activate_rule_set`. Hasta entonces la base sigue con las reglas viejas, y **el envío parcial, los reembolsos y los textos nuevos no se aplican**. El filtro de notas privadas, en cambio, funciona apenas se despliega, porque es código.
+3. **Prompt de DatiHub:** francés por defecto y "vous" siempre (Mejora I), y explicar a Lia los campos `return_inquiry` y `notify_team`.
+4. **Acción de notificación (Zimbra)** sobre `notify_team`.
+
+---
+
 ## Resumen de mejoras, por prioridad
 
-| # | Mejora | Casos | Capa | Bloqueada por |
-|---|---|---|---|---|
-| **B** | **Filtrar notas internas, registros de pago y datos personales del historial** (+ frase de prompt como parche) | 4 fugas | Tool + prompt | — |
-| **A** | Texto de `MAIL_15` (retraso) y de "en stock, 48 h" | 12 | Plantillas | Mejora G para A.1 |
-| **G** | Derivación real cuando el texto promete volver al cliente | — | Plataforma / negocio | Decisión del equipo |
-| **C** | Grupo C (envío parcial): por qué cae en el fail-safe + textos A.3 / A.4 | 3 | Reglas + plantillas | `simulate_rules` |
-| **D** | Retornos: estado 61 sin abono (A.6) y mail 8 para retornos en curso (A.5) | 5 | Reglas + tool | Tema de la pregunta en la tool |
-| **F** | Texto fuera del JSON, incluido razonamiento interno: comprobar en el widget | 16 | Plataforma | Reproducción |
-| **E** | Estados de reembolso con plantilla en vez de escalar | 2 (160 pedidos) | Reglas | Texto de la plantilla |
-| **H** | Aceptar el id numérico; validar el formato del email | 7 | Tool | — |
-| **I** | Francés por defecto y "vous" siempre | 4 | Prompt | — |
-| **J** | Zona horaria de las fechas | 1 | Tool | Verificación |
-| **B′** | Criterio común de revisión sobre información interna | — | Equipo | — |
-| — | Aclarar "notification zimbra" (muestra 1) y los pedidos de Amazon | — | Equipo | Respuesta del equipo |
-
-Todo esto va **después** del redespliegue (Mejora 0 del documento anterior).
+| # | Mejora | Casos | Estado |
+|---|---|---|---|
+| **B** | Filtrar notas internas y registros de pago del historial | 4 fugas | ✅ Corregido en código (§12.1) |
+| **A** | Texto de `MAIL_15` (retraso) y de "en stock, 48 h" | 12 | ✅ Sembrado; pendiente de publicar reglas |
+| **G** | Derivación real cuando el texto promete volver al cliente | — | ⚙️ Marcada con `notify_team`; falta la acción Zimbra |
+| **C** | Grupo C (envío parcial) cae en el fail-safe | 3 | ✅ Corregido; pendiente de publicar reglas. A.4 (con fecha) no se implementa: la fecha solo estaba en notas internas |
+| **D** | Retornos: 61 sin abono (A.6) y mail 8 (A.5) | 5 | ✅ `MAIL_10` y `return_inquiry`; pendiente de publicar reglas |
+| **E** | Estados de reembolso escalaban | 2 (222 pedidos) | ✅ Grupo F y `MAIL_REFUND`; pendiente de publicar reglas |
+| — | Cupón o dinero en la información para Lia | — | ✅ `refund_method` (§12.3) |
+| **F** | Texto fuera del JSON, incluido razonamiento interno | 16 | ⏳ Comprobar en el widget |
+| **H** | Aceptar el id numérico; validar el formato del email | 7 | ⏳ Pendiente |
+| **I** | Francés por defecto y "vous" siempre | 4 | ⏳ Prompt de DatiHub |
+| **J** | Zona horaria de las fechas | 1 | ⏳ Pendiente de verificar |
+| **B′** | Criterio común de revisión sobre información interna | — | ⏳ Equipo |
+| — | Pedidos de Amazon por este canal | — | ⏳ Respuesta del equipo |
 
 ### Pendiente para cerrar el diagnóstico
 
 - Reproducir **XQXBSHEIW** y **GGCVEQPUK** (muestra 1).
-- `simulate_rules` sobre los tres pedidos de envío parcial (§5).
 - Reproducir `e0a88bac` en el widget (§8).
 
 ---
