@@ -261,8 +261,9 @@ const RETURN_COMPLETED_STATE_ID = 61;
 const RETURN_DATA_UNAVAILABLE_REASON =
   "Returns in progress are not visible to this service: only a completed return can be detected, " +
   "through the order state. If the customer asks about a return that is under way, say plainly that " +
-  "you cannot see its status and hand over to a human. Never use the shipping tracking number as if " +
-  "it were the return's.";
+  "you cannot see its status and answer with guidance.return_inquiry when it is present (it holds the " +
+  "approved text on how returns are processed); do not send the customer to customer service by default. " +
+  "Never use the shipping tracking number as if it were the return's.";
 
 /**
  * Moneda de la tienda. El pedido solo trae `id_currency`; resolver el código ISO exigiría un recurso

@@ -754,7 +754,7 @@ describe("buildGuidance", () => {
     "must not present the outbound tracking number as tracking for the customer's return";
   const RETURN_STATUS_PROHIBITION =
     "must not state the status of a return in progress: this service cannot see returns that have not " +
-    "been completed, so hand over to a human instead";
+    "been completed (if asked, answer with guidance.return_inquiry)";
 
   describe("buildGuidance — prohibición de retorno (returnDataAvailable)", () => {
     test("MAIL_3 con returnDataAvailable false: must_not_claim agrega las dos prohibiciones a las de la plantilla", () => {
