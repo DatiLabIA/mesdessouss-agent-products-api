@@ -131,7 +131,9 @@ describe("integridad de la matriz", () => {
       porGrupo.set(s.groupCode, [...(porGrupo.get(s.groupCode) ?? []), s.orderStateId].sort((a, b) => a - b));
     }
     assert.deepEqual(porGrupo.get("A"), [2, 3, 9, 17, 18]);
-    assert.deepEqual(porGrupo.get("B"), [4, 10, 31]);
+    // Estado 5 "Livré" (T5): ya estaba a mano en el conjunto de reglas v2 en base, faltaba en esta
+    // siembra (67 pedidos de los últimos 8.000 vistos por estado actual).
+    assert.deepEqual(porGrupo.get("B"), [4, 5, 10, 31]);
     assert.deepEqual(porGrupo.get("C"), [14]);
     assert.deepEqual(porGrupo.get("R"), [61]);
     // Grupo F (reembolso): 83/68/7 con volumen real verificado (§ hallazgo "Mejora E"),

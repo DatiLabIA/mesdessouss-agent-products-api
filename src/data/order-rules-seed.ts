@@ -53,6 +53,11 @@ export const stateGroupSeed: OrderStateGroupSeed[] = [
   { orderStateId: 31, stateName: "Livraison En Cours", groupCode: "B" },
   { orderStateId: 4, stateName: "En cours de livraison", groupCode: "B" },
   { orderStateId: 10, stateName: "Commande Terminée", groupCode: "B" },
+  // Estado 5 "Livré" (T5, catálogo real de producción, 67 pedidos de los últimos 8.000 leídos por
+  // estado actual): ya se había agregado a mano al conjunto de reglas v2 en base, pero nunca a esta
+  // siembra en código — quedaba sin mapear acá, así que un conjunto nuevo creado desde la siembra
+  // (en vez de clonado del activo) lo hubiera vuelto a mandar al grupo D y escalado siempre.
+  { orderStateId: 5, stateName: "Livré", groupCode: "B" },
   // Grupo C — expedición parcial
   { orderStateId: 14, stateName: "Livraison partielle", groupCode: "C" },
   // Grupo F — reembolso (§ hallazgo "Mejora E" de docs/hallazgos-conversaciones-flow-test.md:
@@ -65,6 +70,29 @@ export const stateGroupSeed: OrderStateGroupSeed[] = [
   { orderStateId: 39, stateName: "Remboursement partiel", groupCode: "F" },
   { orderStateId: 63, stateName: "Partiellement remboursé", groupCode: "F" },
 ];
+
+// ═══════════════════════════════════════════════════════════════════════
+// T5 — Catálogo de estados conocidos del grupo D (por omisión: cualquier estado sin fila arriba)
+//
+// 64 estados en total en `order_states` de producción. De los últimos 8.000 pedidos leídos (por
+// estado ACTUAL, 27/07 → 25/09), el resto de estados con volumen visto y sin mapear son:
+//
+//   78  Autorisation annulée              24 pedidos
+//   6   Annulé                             9 pedidos
+//   1   En attente du paiement par chèque  8 pedidos
+//   8   Erreur de paiement                 2 pedidos
+//   20  Relance paiement par chèque        2 pedidos
+//   70  Commande validée Stockly           1 pedido
+//
+// No se les da fila propia a propósito: caen en el grupo D por comportamiento por defecto del
+// código (§2.1) y `checkFailSafe` los escala siempre, SIN excepción. Los seis son casos de pago o
+// de cancelación (autorización de pago anulada, pedido anulado, a la espera de un cheque, pago con
+// error, cheque reclamado de nuevo, o un pedido de un canal externo — Stockly — todavía sin
+// validar internamente): ninguno tiene un texto aprobado por el equipo, y los seis necesitan que un
+// humano decida (reembolsar, reclamar el pago, confirmar la cancelación), no una respuesta
+// automática. Documentados acá para que quede explícito que la ausencia es deliberada y no un
+// olvido — no para sembrar filas que de todos modos siempre escalarían igual.
+// ═══════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════
 // §2.4 — Plazos de expedición por marca, en días hábiles
