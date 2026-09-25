@@ -292,7 +292,7 @@ const RETURN_TRACKING_PROHIBITION =
   "must not present the outbound tracking number as tracking for the customer's return";
 const RETURN_STATUS_PROHIBITION =
   "must not state the status of a return in progress: this service cannot see returns that have not " +
-  "been completed, so hand over to a human instead";
+  "been completed (if asked, answer with guidance.return_inquiry)";
 
 /**
  * Prohibiciones agregadas por `buildGuidance` cuando `extra.refund` no es `null`/`undefined`, sea
