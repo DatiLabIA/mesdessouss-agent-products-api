@@ -9,6 +9,7 @@ function utc(year: number, month: number, day: number): Date {
 
 const STATE_GROUP_A = 2; // "Commande en cours de traitement", por ejemplo.
 const STATE_UNKNOWN = 9999; // No está en `stateGroups`.
+const STATE_GROUP_R = 61; // "Retour Terminé".
 
 const baseConfig: OrderFactsConfig = {
   stateGroups: new Map([[STATE_GROUP_A, "A"]]),
@@ -20,6 +21,15 @@ const baseConfig: OrderFactsConfig = {
   holidays: new Set<string>(),
   inStockLeadDays: 2,
   shortDelayMaxDays: 3,
+  returnRefundMaxBusinessDays: 7,
+};
+
+const returnConfig: OrderFactsConfig = {
+  ...baseConfig,
+  stateGroups: new Map([
+    [STATE_GROUP_A, "A"],
+    [STATE_GROUP_R, "R"],
+  ]),
 };
 
 function line(overrides: Partial<OrderFactsLineInput>): OrderFactsLineInput {
@@ -327,5 +337,118 @@ describe("computeOrderFacts — tracking e historial", () => {
       baseConfig
     );
     assert.equal(facts.historyHasInfo, null);
+  });
+});
+
+// ─── Bloque RETORNO (§3.2): reembolso y antigüedad en el grupo R ─────────
+
+describe("computeOrderFacts — refundIssued", () => {
+  test("por defecto (llamador no lo informa) es false", () => {
+    const facts = computeOrderFacts(
+      {
+        orderDate: ORDER_DATE,
+        stateId: STATE_GROUP_A,
+        trackingNumber: null,
+        lines: [line({ brand: "Aubade", stockQuantity: 3 })],
+        historyHasInfo: null,
+        today: ORDER_DATE,
+      },
+      baseConfig
+    );
+    assert.equal(facts.refundIssued, false);
+  });
+
+  test("viaja tal cual cuando el llamador lo informa", () => {
+    const facts = computeOrderFacts(
+      {
+        orderDate: ORDER_DATE,
+        stateId: STATE_GROUP_R,
+        trackingNumber: null,
+        lines: [line({ brand: "Aubade", stockQuantity: 3 })],
+        historyHasInfo: null,
+        today: ORDER_DATE,
+        refundIssued: true,
+      },
+      returnConfig
+    );
+    assert.equal(facts.refundIssued, true);
+  });
+});
+
+describe("computeOrderFacts — antigüedad del retorno (returnAgeBusinessDays, returnRefundStale)", () => {
+  const RETURN_ENTERED_AT = utc(2026, 1, 5); // lunes
+
+  function returnFacts(overrides: { today: Date; refundIssued?: boolean; returnEnteredAt?: Date | null }) {
+    return computeOrderFacts(
+      {
+        orderDate: ORDER_DATE,
+        stateId: STATE_GROUP_R,
+        trackingNumber: null,
+        lines: [line({ brand: "Aubade", stockQuantity: 3 })],
+        historyHasInfo: null,
+        today: overrides.today,
+        refundIssued: overrides.refundIssued ?? false,
+        // `??` trataría un `null` explícito igual que "no informado" y volvería a caer en el
+        // valor por defecto: hay que distinguir "la clave no vino" (`undefined`) de "vino null a
+        // propósito" (el test de "nunca entró" la necesita).
+        returnEnteredAt: overrides.returnEnteredAt === undefined ? RETURN_ENTERED_AT : overrides.returnEnteredAt,
+      },
+      returnConfig
+    );
+  }
+
+  test("returnEnteredAt viaja tal cual", () => {
+    const facts = returnFacts({ today: RETURN_ENTERED_AT });
+    assert.equal(facts.returnEnteredAt?.toISOString(), RETURN_ENTERED_AT.toISOString());
+  });
+
+  test("returnAgeBusinessDays es null fuera del grupo R, aunque haya returnEnteredAt", () => {
+    const facts = computeOrderFacts(
+      {
+        orderDate: ORDER_DATE,
+        stateId: STATE_GROUP_A,
+        trackingNumber: null,
+        lines: [line({ brand: "Aubade", stockQuantity: 3 })],
+        historyHasInfo: null,
+        today: utc(2026, 1, 20),
+        returnEnteredAt: RETURN_ENTERED_AT,
+      },
+      baseConfig
+    );
+    assert.equal(facts.returnAgeBusinessDays, null);
+    assert.equal(facts.returnRefundStale, false);
+  });
+
+  test("returnAgeBusinessDays cuenta días hábiles desde returnEnteredAt hasta today", () => {
+    // Lunes 2026-01-05 -> jueves 2026-01-15: 8 días hábiles (ver el comentario del test de
+    // umbral más abajo para el detalle día a día).
+    const facts = returnFacts({ today: utc(2026, 1, 15) });
+    assert.equal(facts.returnAgeBusinessDays, 8);
+  });
+
+  test("exactamente en el umbral (returnRefundMaxBusinessDays = 7) no es stale: la comparación es estricta", () => {
+    // Lunes 2026-01-05 -> miércoles 2026-01-14: 7 días hábiles exactos.
+    const facts = returnFacts({ today: utc(2026, 1, 14) });
+    assert.equal(facts.returnAgeBusinessDays, 7);
+    assert.equal(facts.returnRefundStale, false);
+  });
+
+  test("un día hábil por encima del umbral, sin reembolso: returnRefundStale true", () => {
+    const facts = returnFacts({ today: utc(2026, 1, 15), refundIssued: false });
+    assert.equal(facts.returnAgeBusinessDays, 8);
+    assert.equal(facts.returnRefundStale, true);
+  });
+
+  test("por encima del umbral pero con reembolso ya emitido: returnRefundStale false", () => {
+    const facts = returnFacts({ today: utc(2026, 1, 15), refundIssued: true });
+    assert.equal(facts.returnAgeBusinessDays, 8);
+    assert.equal(facts.returnRefundStale, false);
+  });
+
+  test("sin returnEnteredAt (nunca entró, o el llamador no lo sabe): ni edad ni stale", () => {
+    const facts = returnFacts({ today: utc(2026, 1, 20), returnEnteredAt: null });
+    assert.equal(facts.returnEnteredAt, null);
+    assert.equal(facts.returnAgeBusinessDays, null);
+    assert.equal(facts.returnRefundStale, false);
   });
 });

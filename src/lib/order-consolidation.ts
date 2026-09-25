@@ -2,7 +2,7 @@ import { getMany, getOne, PrestashopNotFoundError } from "./prestashop-client";
 import { toNumericId } from "./order-identity";
 import type { VerifiedCustomerData, VerifiedOrderData } from "../types";
 import type { OrderFactsInput, OrderFactsLineInput, StateGroup } from "./order-facts";
-import type { GuidanceExtraContext, GuidanceOrderContext } from "./rule-evaluator";
+import type { GuidanceExtraContext, GuidanceOrderContext, GuidanceRefundContext } from "./rule-evaluator";
 
 /**
  * Consolidación de un pedido: una sola llamada de más alto nivel que reúne
@@ -162,6 +162,13 @@ interface CustomerMessageRecord {
   id_employee: string | number | null;
   message: string;
   date_add: string;
+  /**
+   * Viaja como string ("0"/"1"), igual que el resto de campos no-`id`. Verificado contra
+   * producción (§ hallazgos de la tarea): todo apunte interno, nota de pago y buena parte de las
+   * respuestas de la tienda tienen `private = 1`; ningún apunte interno se vio jamás en `0`. Es la
+   * barrera real entre un mensaje y Lia — ver `isPublicMessage`.
+   */
+  private: string | number | boolean | null | undefined;
 }
 
 interface CartRuleRecord {
@@ -235,7 +242,7 @@ const CUSTOMER_THREAD_FIELDS = ["id", "id_order", "email", "status", "date_add",
 // `order_slip` ya no usa una whitelist de `display=[...]`: se pide con `displayFull` (ver esa
 // constante en `PrestashopQueryParams`), la única forma verificada de traer
 // `associations.order_slip_details` sin colgar la petición.
-const CUSTOMER_MESSAGE_FIELDS = ["id", "id_customer_thread", "id_employee", "message", "date_add"] as const;
+const CUSTOMER_MESSAGE_FIELDS = ["id", "id_customer_thread", "id_employee", "message", "date_add", "private"] as const;
 const CART_RULE_FIELDS = ["id", "code", "date_to", "active"] as const;
 const ADDRESS_FIELDS = ["id", "alias", "company", "city", "postcode", "id_country"] as const;
 const COUNTRY_FIELDS = ["id", "iso_code"] as const;
@@ -266,10 +273,12 @@ const RETURN_DATA_UNAVAILABLE_REASON =
 const DEFAULT_CURRENCY = "EUR";
 
 /**
- * Prefijo verificado de las notas automáticas del módulo de pago (3D Secure / IPN). Nunca son mensajes
- * de conversación, ni siquiera cuando `private = 0`: el flag `private` es inservible para esto (62% de
- * las respuestas de empleados lo tienen a 1, y clientes responden después igual), así que la nota se
- * reconoce por contenido.
+ * Prefijo verificado de las notas automáticas del módulo de pago (3D Secure / IPN). En la muestra
+ * verificada contra producción, las 288 notas de pago observadas tenían `id_employee = 0` y
+ * `private = 1`: el filtro de `private` (ver `isPublicMessage`) ya las descarta antes de llegar
+ * acá. Esta comprobación por contenido queda como segunda barrera, por si alguna vez llegara una
+ * nota de pago con `private = 0`: nunca debe leerse como conversación real ni tapar el mensaje
+ * real anterior.
  */
 const PAYMENT_MODULE_NOTE_PREFIX = "Action successfully completed";
 
@@ -355,23 +364,40 @@ function isPaymentModuleNote(message: string): boolean {
   return message.trim().startsWith(PAYMENT_MODULE_NOTE_PREFIX);
 }
 
-/** `true` si el autor del mensaje es el cliente: sin empleado asignado (o `0`), nunca por el flag `private`. */
+/**
+ * `true` si el autor del mensaje es el cliente: sin empleado asignado (o `0`). Se asume que
+ * `message` ya pasó `isPublicMessage`: dentro de ese conjunto, `id_employee` es una señal fiable
+ * (§ hallazgos verificados contra producción).
+ */
 function isFromCustomer(message: CustomerMessageRecord): boolean {
   return toNumber(message.id_employee) === 0;
 }
 
-// ─── Inferencia de autoría de un mensaje ───────────────────────────────────
+/**
+ * `true` únicamente cuando `private` llegó explícitamente en "0"/0/false: fail-closed, un valor
+ * ausente o de otro tipo se trata como privado y el mensaje se descarta antes de llegar a Lia.
+ * Verificado contra producción (§ hallazgos de la tarea): ningún apunte interno se vio jamás con
+ * `private = 0`, así que este flag es la barrera real.
+ */
+function isPublicMessage(message: CustomerMessageRecord): boolean {
+  const raw = message.private;
+  return raw === "0" || raw === 0 || raw === false;
+}
+
+// ─── Autoría de un mensaje público ──────────────────────────────────────────
 //
-// `id_employee` NO es fiable: verificado en el hilo 185221 del pedido YOGGHZYXI,
-// un mensaje con `id_employee = 28` (un empleado real) cuyo contenido es
-// evidentemente del cliente -se queja de su propio pedido y firma "Yamine
-// Priem"-, porque alguien de la tienda pegó el correo del cliente dentro del
-// hilo. Mismo patrón de fallo silencioso que ya quemó al flag `private`: un
-// campo que parece de autoría y no lo es.
-//
-// Quita acentos (NFD + strip de diacríticos) y normaliza comillas tipográficas
-// antes de comparar, para que "commandé"/"commande" o "j'ai"/"j'ai" (con
-// apóstrofo curvo) casen igual.
+// Antes hacía falta una cascada por contenido: en el hilo 185221 del pedido YOGGHZYXI, un mensaje
+// con `id_employee = 28` (un empleado real) tenía contenido evidentemente del cliente -se queja de
+// su propio pedido y firma "Yamine Priem"-, porque alguien de la tienda pegó el correo del cliente
+// dentro del hilo. Verificado contra producción (§ hallazgos de la tarea): ese tipo de mensaje
+// pegado llega con `private = 1`, igual que todo apunte interno, así que `isPublicMessage` ya lo
+// descarta antes de que la autoría importe. Dentro del conjunto público que queda, `id_employee` es
+// una señal fiable (0/ausente = cliente, >0 = tienda): la cascada por texto quedó sin objeto.
+
+/**
+ * Quita acentos (NFD + strip de diacríticos) y normaliza comillas tipográficas antes de comparar,
+ * para que variantes acentuadas o con apóstrofo curvo casen igual. Usado por `isGenericAddressAlias`.
+ */
 function normalizeForMatch(text: string): string {
   return text
     .normalize("NFD")
@@ -380,47 +406,15 @@ function normalizeForMatch(text: string): string {
     .toLowerCase();
 }
 
-/** Firma verificada en todas las respuestas reales de Aurélie, Andrea y Mathilde. */
-const SHOP_SIGNATURE_MARKER = "service client";
-
 /**
- * Frases en primera persona como comprador. "ma commande n°" no hace falta como entrada aparte:
- * ya es superconjunto de "ma commande".
- */
-const CUSTOMER_MARKERS = [
-  "ma commande",
-  "mon commande",
-  "j'ai commande",
-  "j'ai passe",
-  "je n'ai pas recu",
-  "mon colis",
-] as const;
-
-function hasShopSignature(message: string): boolean {
-  return normalizeForMatch(message).includes(SHOP_SIGNATURE_MARKER);
-}
-
-function hasCustomerMarker(message: string): boolean {
-  const normalized = normalizeForMatch(message);
-  return CUSTOMER_MARKERS.some((marker) => normalized.includes(marker));
-}
-
-/**
- * Cascada de inferencia de autoría de un mensaje, en orden:
- *
- * 1. Nota del módulo de pago (`isPaymentModuleNote`) → `SYSTEM`, certero.
- * 2. Firma de la tienda presente (`service client`, insensible a mayúsculas/acentos) → `SHOP`, certero.
- * 3. Marca de cliente presente y sin firma de tienda → `CUSTOMER`, certero, sin importar `id_employee`.
- * 4. Ninguna de las dos → cae a `id_employee` (>0 = `SHOP`, 0/ausente = `CUSTOMER`), pero `authorCertain: false`.
- *
- * El paso 3 es el que corrige el caso YOGGHZYXI: un mensaje con `id_employee > 0` pero contenido
- * de cliente ya no se clasifica como `SHOP` por el solo hecho de tener un empleado asignado.
+ * Autoría de un mensaje ya filtrado por `isPublicMessage`. Dentro del conjunto público,
+ * `id_employee` es fiable (§ hallazgos verificados): 0/ausente = cliente, >0 = tienda, siempre
+ * `authorCertain: true`. La nota del módulo de pago (`isPaymentModuleNote`) sigue siendo una
+ * segunda barrera, por si alguna vez llegara una con `private = 0`.
  */
 function inferMessageAuthor(message: CustomerMessageRecord): { author: MessageAuthor; authorCertain: boolean } {
   if (isPaymentModuleNote(message.message)) return { author: "SYSTEM", authorCertain: true };
-  if (hasShopSignature(message.message)) return { author: "SHOP", authorCertain: true };
-  if (hasCustomerMarker(message.message)) return { author: "CUSTOMER", authorCertain: true };
-  return { author: isFromCustomer(message) ? "CUSTOMER" : "SHOP", authorCertain: false };
+  return { author: isFromCustomer(message) ? "CUSTOMER" : "SHOP", authorCertain: true };
 }
 
 // ─── Salida ───────────────────────────────────────────────────────────────
@@ -551,7 +545,11 @@ export type MessageAuthor = "CUSTOMER" | "SHOP" | "SYSTEM";
 export interface ConsolidatedMessage {
   date: Date;
   author: MessageAuthor;
-  /** `false` cuando la autoría se dedujo de un campo poco fiable (`id_employee`) y podría estar equivocada. */
+  /**
+   * Siempre `true`: solo los mensajes públicos (`private = 0`, ver `isPublicMessage`) llegan hasta
+   * acá, y dentro de ese conjunto `id_employee` es una señal fiable. Se conserva el campo (en vez
+   * de quitarlo) para no cambiar el contrato HTTP del payload.
+   */
   authorCertain: boolean;
   text: string;
   threadId: number;
@@ -565,16 +563,18 @@ export interface ConsolidatedConversation {
   lastMessage: string | null;
   lastMessageDate: Date | null;
   /**
-   * El último mensaje real (no una nota del módulo de pago) es del cliente, con autoría inferida
-   * por la cascada de `inferMessageAuthor` (nunca por `isFromCustomer`/`id_employee` en crudo), y
-   * pasaron más de 24 horas sin respuesta. No está en el documento de reglas: se agrega porque en
-   * 4 de 6 casos reales auditados el dato que resolvía la consulta estaba en el hilo, no en el pedido.
+   * El último mensaje PÚBLICO (ver `isPublicMessage`; nunca uno privado, y nunca una nota del
+   * módulo de pago) es del cliente, con autoría por `id_employee` (fiable dentro del conjunto
+   * público), y pasaron más de 24 horas sin respuesta. No está en el documento de reglas: se
+   * agrega porque en 4 de 6 casos reales auditados el dato que resolvía la consulta estaba en el
+   * hilo, no en el pedido.
    */
   awaitingShopReply: boolean;
   /**
-   * Últimos `MAX_RECENT_MESSAGES` mensajes reales del pedido, fusionados de TODOS sus hilos (un
-   * pedido puede tener más de uno: el 704330 tenía dos) y ordenados cronológicamente ascendente.
-   * Nunca incluye notas automáticas del módulo de pago.
+   * Últimos `MAX_RECENT_MESSAGES` mensajes PÚBLICOS del pedido (ver `isPublicMessage`), fusionados
+   * de TODOS sus hilos (un pedido puede tener más de uno: el 704330 tenía dos) y ordenados
+   * cronológicamente ascendente. Nunca incluye apuntes internos, correos pegados por staff, ni
+   * notas automáticas del módulo de pago.
    */
   messages: ConsolidatedMessage[];
 }
@@ -682,6 +682,24 @@ function computeShippedAt(histories: OrderHistoryRecord[], stateGroups: Map<numb
     if (earliest === null || date.getTime() < earliest.getTime()) earliest = date;
   }
   return earliest;
+}
+
+/**
+ * Fecha en que el pedido entró más recientemente al grupo R (retorno terminado, §3.2; hoy solo el
+ * estado 61). A diferencia de `computeShippedAt` (la PRIMERA entrada al grupo B), acá se quiere la
+ * ÚLTIMA: si el pedido entró en 61 más de una vez, el texto A.6 del equipo habla de la recepción
+ * más reciente del paquete, no de la primera (§ hallazgo "Estado 61 timing" del task doc). `null`
+ * si el pedido nunca entró al grupo R.
+ */
+function computeReturnEnteredAt(histories: OrderHistoryRecord[], stateGroups: Map<number, StateGroup>): Date | null {
+  let latest: Date | null = null;
+  for (const history of histories) {
+    if (stateGroups.get(toNumericId(history.id_order_state)) !== "R") continue;
+    const date = parsePrestashopDate(history.date_add);
+    if (date === null) continue;
+    if (latest === null || date.getTime() > latest.getTime()) latest = date;
+  }
+  return latest;
 }
 
 /**
@@ -934,29 +952,36 @@ function pickPrimaryThread(
 
 /**
  * Regla conservadora del `historyHasInfo` que consume el motor de reglas (§7.1 del documento habla de
- * que la IA interpreta el historial para los mails 6 y 7; acá no se adivina):
+ * que la IA interpreta el historial para los mails 6 y 7; acá no se adivina). Se calcula solo sobre
+ * mensajes PÚBLICOS (`isPublicMessage`): un apunte interno o un correo pegado por staff no cuenta
+ * como "hay información en el historial", ni aunque contuviera datos reales, porque nunca llega a
+ * Lia:
  *
- * - Si NINGÚN mensaje del pedido (en ningún hilo) es real —todos son notas automáticas del módulo de
- *   pago, o no hay mensajes en absoluto— el historial se declara mecánicamente vacío: `false`. Eso
- *   habilita el mail 7.
- * - Si hay al menos un mensaje real, no se afirma que contenga productos pendientes o un plazo: se
- *   devuelve `null`, que el evaluador de la matriz trata como "no lo sé" y escala. En fase 1, esto
- *   implica que el Grupo C con historial no vacío escala siempre, aunque el mensaje real no aporte
- *   nada útil: es preferible a inventar una lectura del contenido.
+ * - Si NINGÚN mensaje público del pedido (en ningún hilo) es real —todos son notas automáticas del
+ *   módulo de pago, o no hay mensajes públicos en absoluto— el historial se declara mecánicamente
+ *   vacío: `false`. Eso habilita el mail 7.
+ * - Si hay al menos un mensaje público real, no se afirma que contenga productos pendientes o un
+ *   plazo: se devuelve `null`, que el evaluador de la matriz trata como "no lo sé" y escala. En fase
+ *   1, esto implica que el Grupo C con historial no vacío escala siempre, aunque el mensaje real no
+ *   aporte nada útil: es preferible a inventar una lectura del contenido.
  */
 function computeHistoryHasInfo(allMessages: CustomerMessageRecord[]): boolean | null {
-  const hasRealMessage = allMessages.some((m) => !isPaymentModuleNote(m.message));
-  return hasRealMessage ? null : false;
+  const hasPublicRealMessage = allMessages.some((m) => isPublicMessage(m) && !isPaymentModuleNote(m.message));
+  return hasPublicRealMessage ? null : false;
 }
 
 /**
- * Fusiona los mensajes reales (sin notas del módulo de pago) de TODOS los hilos del pedido, con
- * autoría inferida por `inferMessageAuthor`, ordenados cronológicamente ascendente. `allMessages`
- * ya viene de todos los hilos del pedido (ola 3 de `consolidateOrder`), así que no hace falta
- * recorrer hilo por hilo.
+ * Fusiona los mensajes PÚBLICOS (`isPublicMessage`) y reales (sin notas del módulo de pago) de
+ * TODOS los hilos del pedido, con autoría por `inferMessageAuthor`, ordenados cronológicamente
+ * ascendente. `allMessages` ya viene de todos los hilos del pedido (ola 3 de `consolidateOrder`),
+ * así que no hace falta recorrer hilo por hilo. Un mensaje privado (apunte interno, correo de
+ * cliente pegado por staff, o cualquier otro con `private` distinto de "0"/0/false) nunca llega a
+ * este resultado: es la corrección del incidente de producción en que esos apuntes se leyeron al
+ * cliente.
  */
 function buildConversationMessages(allMessages: CustomerMessageRecord[]): ConsolidatedMessage[] {
   return allMessages
+    .filter(isPublicMessage)
     .map((message) => {
       const { author, authorCertain } = inferMessageAuthor(message);
       return {
@@ -990,7 +1015,9 @@ function computeConversation(
     return { threadId: null, lastMessage: null, lastMessageDate: null, awaitingShopReply, messages: recentMessages };
   }
 
-  const primaryMessages = messagesByThread.get(primaryThread.id) ?? [];
+  // Filtrado por `isPublicMessage`: sin esto, `lastMessage`/`lastMessageDate` podrían exponer el
+  // texto de un apunte interno o de un correo pegado por staff, aunque `messages` ya esté filtrado.
+  const primaryMessages = (messagesByThread.get(primaryThread.id) ?? []).filter(isPublicMessage);
   const sorted = [...primaryMessages].sort(
     (a, b) => (parsePrestashopDate(a.date_add)?.getTime() ?? 0) - (parsePrestashopDate(b.date_add)?.getTime() ?? 0)
   );
@@ -1161,13 +1188,17 @@ export async function consolidateOrder(
 
   // ─── Ensamblado ─────────────────────────────────────────────────────
 
+  // `id_customer_thread` llega como string ("184425") aunque el tipo diga number, y el mapa se
+  // consulta con `thread.id`, que sí es numérico: sin normalizar la clave, ningún hilo encontraba
+  // sus mensajes, `lastMessage` salía siempre null y el hilo "más activo" se elegía a ciegas.
   const messagesByThread = new Map<number, CustomerMessageRecord[]>();
   for (const message of allMessages) {
-    const bucket = messagesByThread.get(message.id_customer_thread);
+    const threadId = toNumericId(message.id_customer_thread);
+    const bucket = messagesByThread.get(threadId);
     if (bucket) {
       bucket.push(message);
     } else {
-      messagesByThread.set(message.id_customer_thread, [message]);
+      messagesByThread.set(threadId, [message]);
     }
   }
 
@@ -1192,6 +1223,11 @@ export async function consolidateOrder(
   const primaryThread = pickPrimaryThread(threads, messagesByThread);
   const conversation = computeConversation(primaryThread, messagesByThread, allMessages, input.today);
   const historyHasInfo = computeHistoryHasInfo(allMessages);
+  // `refund !== null`: el hecho que decide entre las dos filas del grupo R (MAIL_12/MAIL_10, §3.2)
+  // y entre las dos prohibiciones dinámicas de reembolso en `buildGuidance`. Siempre se conoce
+  // (el avoir existe o no existe), a diferencia de `historyHasInfo`.
+  const refundIssued = refund !== null;
+  const returnEnteredAt = computeReturnEnteredAt(histories, stateGroups);
 
   const facts: OrderFactsInput = {
     orderDate,
@@ -1200,6 +1236,8 @@ export async function consolidateOrder(
     lines: factsLines,
     historyHasInfo,
     today: input.today,
+    refundIssued,
+    returnEnteredAt,
   };
 
   const orderContext: GuidanceOrderContext = {
@@ -1214,10 +1252,19 @@ export async function consolidateOrder(
   // la prohibición que agrega `buildGuidance` en `must_not_claim` deja de aplicarse sola.
   const returnDataAvailable: false = false;
 
+  // Forma mínima que `resolveFactValue`/`buildGuidance` necesitan (`GuidanceRefundContext`), no el
+  // `ConsolidatedRefund` completo: ese tipo vive en este módulo, y `rule-evaluator.ts` no puede
+  // importarlo sin crear un ciclo (ver el JSDoc de `GuidanceRefundContext`).
+  const guidanceRefund: GuidanceRefundContext | null =
+    refund !== null
+      ? { type: refund.type, voucherExpiresAt: refund.voucherExpiresAt, lineNames: refund.lines.map((l) => l.name) }
+      : null;
+
   const extraContext: GuidanceExtraContext = {
     pendingProducts: null,
     additionalDelay: null,
     processedDate: refund?.processedDate ?? null,
+    refund: guidanceRefund,
     returnDataAvailable,
   };
 

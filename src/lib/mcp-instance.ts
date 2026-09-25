@@ -552,7 +552,7 @@ export function createMcpServer(): McpServer {
   // ─── set_state_group ─────────────────────────────────────────────────────
   server.tool(
     "set_state_group",
-    "Asigna el grupo del árbol de decisión a un estado de PrestaShop, dentro de un BORRADOR (create_rule_draft primero). A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, R=bloque retorno. Alta o actualización (upsert) por order_state_id. No se puede editar el conjunto activo.",
+    "Asigna el grupo del árbol de decisión a un estado de PrestaShop, dentro de un BORRADOR (create_rule_draft primero). A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, R=bloque retorno (estado 61 terminado: responde MAIL_12 o MAIL_10 según si ya hay reembolso), F=reembolsado (estados de reembolso: el pedido tiene avoir/abono; responde MAIL_REFUND). Alta o actualización (upsert) por order_state_id. No se puede editar el conjunto activo.",
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
       orderStateId: z
@@ -560,7 +560,12 @@ export function createMcpServer(): McpServer {
         .int()
         .describe("id del estado en PrestaShop (order_states.id). El mapeo es siempre por id, nunca por nombre: los nombres de estado cambian."),
       stateName: z.string().nullable().describe("Nombre del estado, solo para lectura humana. Nunca se usa para matchear."),
-      groupCode: z.enum(STATE_GROUP_CODES).describe("Grupo del árbol de decisión: A, B, C, D o R."),
+      groupCode: z
+        .enum(STATE_GROUP_CODES)
+        .describe(
+          "Grupo del árbol de decisión: A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar siempre, " +
+            "F=reembolsado (avoir/abono ya emitido, responde MAIL_REFUND), o R=bloque retorno (estado 61 terminado)."
+        ),
     },
     async ({ version, orderStateId, stateName, groupCode }) => {
       try {
@@ -606,7 +611,13 @@ export function createMcpServer(): McpServer {
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
       priority: z.number().int().describe("Orden de evaluación, ascendente. Gana la primera fila que matchea los hechos del pedido."),
-      stateGroup: z.enum(STATE_GROUP_CODES).nullable().describe("Grupo requerido, o null = cualquiera."),
+      stateGroup: z
+        .enum(STATE_GROUP_CODES)
+        .nullable()
+        .describe(
+          "Grupo requerido (A=no expedido, B=expedido, C=expedición parcial, D=resto/escalar, " +
+            "F=reembolsado, R=bloque retorno), o null = cualquiera."
+        ),
       stockStatus: z.enum(STOCK_STATUSES).nullable().describe("Estado de stock del pedido requerido, o null = cualquiera."),
       brandCount: z
         .enum(BRAND_COUNTS)
@@ -621,7 +632,19 @@ export function createMcpServer(): McpServer {
         .boolean()
         .nullable()
         .describe("Si requiere que el historial de mensajes tenga información útil (true) o esté vacío (false), o null = cualquiera."),
-      outcome: z.enum(RULE_OUTCOMES).describe("Desenlace de esta fila: qué mail corresponde, o ESCALATE."),
+      refundIssued: z
+        .boolean()
+        .nullable()
+        .describe(
+          "Si requiere que ya haya un reembolso registrado (true) o que no lo haya (false), o null = cualquiera. Solo lo usan las filas del grupo R (bloque RETORNO)."
+        ),
+      outcome: z
+        .enum(RULE_OUTCOMES)
+        .describe(
+          "Desenlace de esta fila: qué mail corresponde (incluidos MAIL_10 y MAIL_REFUND), o ESCALATE. " +
+            "MAIL_8 nunca debería usarse acá: ninguna fila de la matriz lo selecciona, se entrega aparte " +
+            "como guidance.return_inquiry cuando el pedido no está en el grupo R ni F (ver set_template)."
+        ),
       note: z
         .string()
         .min(1)
@@ -645,20 +668,35 @@ export function createMcpServer(): McpServer {
   // ─── set_template ────────────────────────────────────────────────────────
   server.tool(
     "set_template",
-    "Da de alta o actualiza la plantilla de un desenlace (outcome), dentro de un BORRADOR (create_rule_draft primero): el texto base aprobado, los datos que Lia tiene que transmitir (facts_to_convey) y las afirmaciones que tiene prohibido hacer (must_not_claim). Alta o actualización (upsert) por outcome+lang. No se puede editar el conjunto activo.",
+    "Da de alta o actualiza la plantilla de un desenlace (outcome), dentro de un BORRADOR (create_rule_draft primero): el texto base aprobado, los datos que Lia tiene que transmitir (facts_to_convey), las afirmaciones que tiene prohibido hacer (must_not_claim) y si el desenlace tiene que marcarse para que el equipo lo revise (notify_team). Alta o actualización (upsert) por outcome+lang. No se puede editar el conjunto activo.",
     {
       version: z.number().int().describe("Versión del borrador a editar (nunca la activa; usá create_rule_draft si no tenés una)."),
-      outcome: z.enum(RULE_OUTCOMES).describe("Desenlace al que corresponde esta plantilla."),
+      outcome: z
+        .enum(RULE_OUTCOMES)
+        .describe(
+          "Desenlace al que corresponde esta plantilla (incluidos MAIL_10 y MAIL_REFUND). MAIL_8 es especial: " +
+            "ninguna fila de la matriz lo selecciona (ver set_decision_rule), pero SÍ conviene sembrarle una " +
+            "plantilla acá — buildGuidance la ofrece aparte, como guidance.return_inquiry, para cuando el " +
+            "cliente pregunte por una devolución de un pedido que no está en el grupo R ni F."
+        ),
       lang: z.enum(RULE_TEMPLATE_LANGS).describe("Idioma de la plantilla. Hoy el runtime solo usa 'fr'."),
       body: z.string().describe("Texto base aprobado. Puede quedar vacío si todavía no hay texto aprobado para este desenlace."),
       factsToConvey: z
         .array(z.string())
         .describe("Claves de los datos que Lia tiene que transmitir en este desenlace (ej: 'order_reference', 'tracking_url')."),
       mustNotClaim: z.array(z.string()).describe("Afirmaciones que Lia tiene prohibido hacer para este desenlace."),
+      notifyTeam: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Si este desenlace tiene que marcarse para que el equipo lo revise (viaja como guidance.notify_team). " +
+            "Esto SOLO pone la bandera: el servicio nunca envía ninguna notificación por su cuenta. Por defecto false."
+        ),
     },
-    async ({ version, outcome, lang, body, factsToConvey, mustNotClaim }) => {
+    async ({ version, outcome, lang, body, factsToConvey, mustNotClaim, notifyTeam }) => {
       try {
-        await setTemplate(CLIENT_ID, version, { outcome, lang, body, factsToConvey, mustNotClaim });
+        await setTemplate(CLIENT_ID, version, { outcome, lang, body, factsToConvey, mustNotClaim, notifyTeam });
         return { content: [{ type: "text", text: `✓ Plantilla ${outcome}/${lang} guardada en el borrador v${version}.` }] };
       } catch (err) {
         if (err instanceof RuleSetNotFoundError || err instanceof RuleSetStateError || err instanceof RuleSetValidationError) {
@@ -742,6 +780,7 @@ export function createMcpServer(): McpServer {
           holidays: ruleSet.holidays,
           inStockLeadDays: ruleSet.settings.inStockLeadDays,
           shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+          returnRefundMaxBusinessDays: ruleSet.settings.returnRefundMaxBusinessDays,
         });
 
         const evaluation = evaluateRules(facts, ruleSet.decisions);
@@ -819,6 +858,7 @@ export function createMcpServer(): McpServer {
           holidays: ruleSet.holidays,
           inStockLeadDays: ruleSet.settings.inStockLeadDays,
           shortDelayMaxDays: ruleSet.settings.shortDelayMaxDays,
+          returnRefundMaxBusinessDays: ruleSet.settings.returnRefundMaxBusinessDays,
         });
 
         const evaluation = evaluateRules(facts, ruleSet.decisions);

@@ -76,7 +76,7 @@ export class RuleSetActivationConflictError extends Error {
 // `mcp-instance.ts`. Duplicar esta lista allá sería exactamente el error de
 // `normalizeBrandKey` de T6/T7: dos copias que hoy coinciden y mañana no.
 
-export const STATE_GROUP_CODES = ["A", "B", "C", "D", "R"] as const;
+export const STATE_GROUP_CODES = ["A", "B", "C", "D", "R", "F"] as const;
 export const STOCK_STATUSES = ["EN_STOCK", "SIN_STOCK"] as const;
 export const BRAND_COUNTS = ["ONE", "MANY"] as const;
 export const DELAY_BUCKET_CONDITIONS = ["NONE", "SHORT", "LONG", "POSITIVE"] as const;
@@ -88,8 +88,11 @@ export const RULE_OUTCOMES = [
   "MAIL_5",
   "MAIL_6",
   "MAIL_7",
+  "MAIL_8",
+  "MAIL_10",
   "MAIL_12",
   "MAIL_15",
+  "MAIL_REFUND",
   "ESCALATE",
 ] as const;
 /**
@@ -147,6 +150,7 @@ export interface RawDecisionRow {
   delayBucket: string | null;
   hasTracking: boolean | null;
   historyHasInfo: boolean | null;
+  refundIssued: boolean | null;
   outcome: string;
   note: string | null;
 }
@@ -157,6 +161,13 @@ export interface RawTemplateRow {
   body: string;
   factsToConvey: unknown;
   mustNotClaim: unknown;
+  /**
+   * T4. Opcional: una fila cruda de un conjunto sembrado ANTES de T4 (la migración que agrega la
+   * columna la backfillea a `false` en base, pero una fila fabricada a mano — tests, u otra fuente
+   * futura — podría seguir sin traerla) no debe romper la carga. `parseTemplates` la trata como
+   * `false` cuando falta, nunca como un dato faltante que escale.
+   */
+  notifyTeam?: boolean;
 }
 
 export interface RawSettingRow {
@@ -192,6 +203,7 @@ const decisionRowSchema = z.object({
   delayBucket: delayBucketConditionSchema.nullable(),
   hasTracking: z.boolean().nullable(),
   historyHasInfo: z.boolean().nullable(),
+  refundIssued: z.boolean().nullable(),
   outcome: ruleOutcomeSchema,
   note: z.string().trim().min(1, "toda fila de la matriz necesita una nota legible (se usa para explicar la decisión)"),
 });
@@ -202,6 +214,10 @@ const templateRowSchema = z.object({
   body: z.string(),
   factsToConvey: z.array(z.string()),
   mustNotClaim: z.array(z.string()),
+  // `.default(false)` (T4): una fila sin la columna (conjunto sembrado antes de T4, o una fila
+  // fabricada a mano sin pensar en el campo nuevo) se trata como "no notifica al equipo", nunca
+  // como un dato inválido — ver el JSDoc de `RawTemplateRow.notifyTeam`.
+  notifyTeam: z.boolean().optional().default(false),
 });
 
 const settingRowSchema = z.object({
@@ -271,16 +287,39 @@ export function parseTemplates(rows: readonly RawTemplateRow[]): RuleTemplateSee
   );
 }
 
-/** Ajustes obligatorios que `OrderFactsConfig` necesita para calcular plazos (§2.4, §2.5). */
+/** Ajustes obligatorios que `OrderFactsConfig` necesita para calcular plazos (§2.4, §2.5) y para el fail-safe del grupo R. */
 export interface RuleSettingsConfig {
   inStockLeadDays: number;
   shortDelayMaxDays: number;
+  returnRefundMaxBusinessDays: number;
 }
 
 const REQUIRED_NUMERIC_SETTINGS = [
   { key: "in_stock_lead_days", field: "inStockLeadDays" },
   { key: "short_delay_max_days", field: "shortDelayMaxDays" },
 ] as const;
+
+/**
+ * Clave y campo del único ajuste OPCIONAL: `return_refund_max_business_days`. A diferencia de los
+ * dos de `REQUIRED_NUMERIC_SETTINGS` (que existen desde el primer conjunto de reglas), T2 agregó
+ * este DESPUÉS de que ya hubiera un conjunto activo en producción. Exigirlo como los otros dos
+ * significa que `loadActiveRuleSet` lanza para el conjunto activo real de hoy (que predata T2), y el
+ * handler de `order_lookup` devuelve 503 para CUALQUIER consulta verificada — un corte total del
+ * servicio, no la escalada puntual de un pedido — hasta que alguien publique un conjunto nuevo.
+ *
+ * Fallar cerrado tiene sentido para un dato de negocio que Lia necesita para redactar (§7.4); no
+ * tiene sentido para el umbral interno de un fail-safe de código cuando el propio texto ya aprobado
+ * por el equipo (A.6: "délai maximum de 7 jours") ya da un valor razonable por defecto. Si la fila
+ * SÍ existe pero es inválida (no numérica), la validación sigue fallando igual que cualquier otro
+ * ajuste — el problema ahí no es que falte la migración, es un dato roto.
+ */
+const RETURN_REFUND_MAX_BUSINESS_DAYS_SETTING = {
+  key: "return_refund_max_business_days",
+  field: "returnRefundMaxBusinessDays",
+} as const;
+
+/** Valor por defecto de `return_refund_max_business_days` cuando el ajuste no existe todavía. Ver el JSDoc de arriba. */
+export const DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS = 7;
 
 /**
  * Resuelve `RuleSettingsConfig` a partir de las filas de `rule_settings`.
@@ -311,6 +350,20 @@ export function parseRuleSettings(rows: readonly RawSettingRow[]): RuleSettingsC
     }
     result[field] = numeric.data;
   }
+
+  const { key: returnRefundKey, field: returnRefundField } = RETURN_REFUND_MAX_BUSINESS_DAYS_SETTING;
+  if (!byKey.has(returnRefundKey)) {
+    result[returnRefundField] = DEFAULT_RETURN_REFUND_MAX_BUSINESS_DAYS;
+  } else {
+    const numeric = numericSettingValueSchema.safeParse(byKey.get(returnRefundKey));
+    if (!numeric.success) {
+      throw new RuleSetValidationError(
+        `El ajuste "${returnRefundKey}" debe ser numérico; se recibió ${JSON.stringify(byKey.get(returnRefundKey))}.`
+      );
+    }
+    result[returnRefundField] = numeric.data;
+  }
+
   return result;
 }
 

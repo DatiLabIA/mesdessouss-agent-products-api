@@ -92,6 +92,7 @@ describe("integridad de la matriz", () => {
       ultima.delayBucket,
       ultima.hasTracking,
       ultima.historyHasInfo,
+      ultima.refundIssued,
     ]) {
       assert.equal(cond ?? null, null, "el cajón de sastre no puede llevar condiciones");
     }
@@ -105,13 +106,51 @@ describe("integridad de la matriz", () => {
     }
   });
 
+  test("MAIL_8 es la única plantilla sembrada sin fila propia en la matriz, a propósito (T4)", () => {
+    // El resto de plantillas sembradas corresponden 1:1 a una fila real de la matriz. MAIL_8
+    // (retorno en curso, texto A.5) es la excepción deliberada: `order_lookup` no sabe si la
+    // pregunta del cliente es sobre una devolución, así que `buildGuidance` la entrega siempre
+    // como el bloque adicional `return_inquiry`, nunca como el desenlace principal (§ JSDoc de
+    // `RuleOutcome` en este fichero). Este test documenta esa excepción en vez de dejarla pasar
+    // en silencio: si alguna otra plantilla queda huérfana en el futuro, debe fallar acá.
+    const outcomesConFila = new Set(ruleDecisionSeed.map((r) => r.outcome));
+    const plantillasHuerfanas = ruleTemplateSeed.filter((t) => !outcomesConFila.has(t.outcome));
+    assert.deepEqual(plantillasHuerfanas.map((t) => t.outcome), ["MAIL_8"]);
+  });
+
+  test("notifyTeam: solo MAIL_15 lo pide, ninguna otra plantilla sembrada (T4)", () => {
+    // Guarda de regresión concreta: MAIL_15 es el único texto sembrado que promete un seguimiento
+    // del equipo ("nous reviendrons vers vous dans un délai de 48 heures ouvrées", § hallazgo 7).
+    const conNotifyTeam = ruleTemplateSeed.filter((t) => t.notifyTeam).map((t) => t.outcome);
+    assert.deepEqual(conNotifyTeam, ["MAIL_15"]);
+  });
+
   test("los grupos de estado sembrados son los verificados contra PrestaShop", () => {
     const porGrupo = new Map<string, number[]>();
     for (const s of stateGroupSeed) {
       porGrupo.set(s.groupCode, [...(porGrupo.get(s.groupCode) ?? []), s.orderStateId].sort((a, b) => a - b));
     }
     assert.deepEqual(porGrupo.get("A"), [2, 3, 9, 17, 18]);
-    assert.deepEqual(porGrupo.get("B"), [4, 10, 31]);
+    // Estado 5 "Livré" (T5): ya estaba a mano en el conjunto de reglas v2 en base, faltaba en esta
+    // siembra (67 pedidos de los últimos 8.000 vistos por estado actual).
+    assert.deepEqual(porGrupo.get("B"), [4, 5, 10, 31]);
     assert.deepEqual(porGrupo.get("C"), [14]);
+    assert.deepEqual(porGrupo.get("R"), [61]);
+    // Grupo F (reembolso): 83/68/7 con volumen real verificado (§ hallazgo "Mejora E"),
+    // 39/63 sembrados igual aunque sin volumen visto todavía.
+    assert.deepEqual(porGrupo.get("F"), [7, 39, 63, 68, 83]);
+  });
+
+  test("las filas del grupo R son las dos únicas que usan refundIssued, con true y false", () => {
+    const filasR = ruleDecisionSeed.filter((r) => r.stateGroup === "R");
+    assert.equal(filasR.length, 2);
+    assert.deepEqual(
+      filasR.map((r) => r.refundIssued).sort(),
+      [false, true]
+    );
+    for (const regla of ruleDecisionSeed) {
+      if (regla.stateGroup === "R") continue;
+      assert.equal(regla.refundIssued, null, `la fila ${regla.priority} (${regla.outcome}) no es del grupo R y no debería exigir refundIssued`);
+    }
   });
 });

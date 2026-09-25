@@ -164,6 +164,7 @@ function fakeRuleSet(): LoadedRuleSet {
         delayBucket: null,
         hasTracking: null,
         historyHasInfo: null,
+        refundIssued: null,
         outcome: "MAIL_1",
         note: "Confirmación estándar de pedido en stock.",
       },
@@ -175,10 +176,15 @@ function fakeRuleSet(): LoadedRuleSet {
         delayBucket: null,
         hasTracking: null,
         historyHasInfo: null,
+        refundIssued: null,
         outcome: "ESCALATE",
         note: "Cajón de sastre: ninguna otra fila matcheó.",
       },
     ],
+    // Deliberadamente SIN ninguna plantilla MAIL_8 (T4): este conjunto fake representa la forma
+    // "vieja" (previa a T4) del conjunto activo real, así que el camino feliz de más abajo también
+    // sirve para probar que `guidance.return_inquiry` se omite y `notify_team` resuelve `false` sin
+    // romper nada cuando el conjunto no tiene los campos nuevos.
     templates: [
       {
         outcome: "MAIL_1",
@@ -186,9 +192,29 @@ function fakeRuleSet(): LoadedRuleSet {
         body: "Merci pour votre commande, elle est en cours de préparation.",
         factsToConvey: ["order_reference"],
         mustNotClaim: ["no afirmar que el pedido ya fue expedido"],
+        notifyTeam: false,
       },
     ],
-    settings: { inStockLeadDays: 2, shortDelayMaxDays: 3 },
+    settings: { inStockLeadDays: 2, shortDelayMaxDays: 3, returnRefundMaxBusinessDays: 7 },
+  };
+}
+
+/** Mismo conjunto que `fakeRuleSet`, con la plantilla MAIL_8 sembrada (T4) para probar `return_inquiry`. */
+function fakeRuleSetWithReturnInquiry(): LoadedRuleSet {
+  const base = fakeRuleSet();
+  return {
+    ...base,
+    templates: [
+      ...base.templates,
+      {
+        outcome: "MAIL_8",
+        lang: "fr",
+        body: "Votre colis retour n'a pas encore été traité par notre service retours.",
+        factsToConvey: [],
+        mustNotClaim: ["must not use this template unless the customer asked about a return"],
+        notifyTeam: false,
+      },
+    ],
   };
 }
 
@@ -474,10 +500,38 @@ describe("POST /order_lookup — camino feliz", () => {
     assert.equal(guidance.must_escalate, false);
     assert.ok(Array.isArray(guidance.facts_to_convey));
 
+    // T4: el conjunto fake no marca MAIL_1 para seguimiento del equipo ni trae ninguna plantilla
+    // MAIL_8 — mismo caso que el conjunto activo real hoy, sembrado antes de T4 (compatibilidad
+    // hacia atrás: ver "notifyTeam absent → false" / "missing MAIL_8 → no return_inquiry").
+    assert.equal(guidance.notify_team, false);
+    assert.equal("return_inquiry" in guidance, false);
+
     const serialized = JSON.stringify(body);
     assert.ok(!serialized.includes("passwd"));
     assert.ok(!serialized.includes("secure_key"));
     assert.ok(!serialized.includes("reset_password_token"));
+  });
+});
+
+describe("POST /order_lookup — T4: notify_team y return_inquiry", () => {
+  test("conjunto de reglas con MAIL_8 sembrado y pedido fuera de R/F → guidance.return_inquiry llega en el payload HTTP", async () => {
+    stubHappyPath();
+    const handler = createOrderLookupHandler(fakeDeps({ loadActiveRuleSet: async () => fakeRuleSetWithReturnInquiry() }));
+    const res = fakeRes();
+    await handler(
+      fakeReq({ body: { reference: REFERENCE, email: ACCOUNT_EMAIL }, ip: uniqueIp() }) as never,
+      res as never
+    );
+
+    assert.equal(res.statusCode, 200);
+    const body = res.body as Record<string, unknown>;
+    const guidance = body.guidance as Record<string, unknown>;
+    assert.equal(guidance.notify_team, false);
+    assert.ok(guidance.return_inquiry, "return_inquiry debe llegar en el payload HTTP");
+    const returnInquiry = guidance.return_inquiry as Record<string, unknown>;
+    assert.equal(returnInquiry.reference_template, "MAIL_8");
+    assert.match(returnInquiry.template_text as string, /colis retour n'a pas encore été traité/);
+    assert.ok(typeof returnInquiry.instruction === "string" && returnInquiry.instruction.length > 0);
   });
 });
 
